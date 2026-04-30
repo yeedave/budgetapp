@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Virtual envs (not used — mamba env lives in ~/.mamba)
+.venv/
+venv/
+env/
+
+# Data — never commit real bank statements or the SQLite db
+data/
+*.pdf
+*.db
+*.sqlite
+
+# Frontend build output
+frontend/dist/
+frontend/node_modules/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editors
+.vscode/settings.json
+.idea/
+*.swp
+
+# Env files
+.env
+.env.*
