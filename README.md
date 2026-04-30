@@ -1,6 +1,6 @@
 # budgetapp
 
-Desktop budget tracker for Dave + Cam. Imports bank statement PDFs, auto-categorizes transactions, renders an interactive dashboard.
+Desktop budget tracker for Household incomes. Imports bank statement PDFs, auto-categorizes transactions, renders an interactive dashboard.
 
 ## Stack
 - Python 3.12 · pdfplumber · pandas · SQLite · pywebview
