@@ -53,6 +53,22 @@ CREATE TABLE IF NOT EXISTS budget_bucket_categories (
     category_id TEXT    NOT NULL REFERENCES categories(id),
     PRIMARY KEY (bucket_id, category_id)
 );
+
+CREATE TABLE IF NOT EXISTS debts (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    balance     TEXT,
+    apr         TEXT,
+    minimum     TEXT,
+    category_id TEXT
+);
+
+CREATE TABLE IF NOT EXISTS savings_trackers (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    balance     TEXT NOT NULL DEFAULT '0',
+    category_id TEXT
+);
 """
 
 # Seed accounts matching known bank statements
@@ -102,6 +118,8 @@ _SEED_CATEGORIES = [
     ("sav_marcus", "Marcus HYSA", "savings", "dave", None),
     ("sav_baby", "Baby Funds", "savings", "joint", None),
     ("sav_orejana", "Orejana Bach", "savings", "joint", None),
+    # Transfers (excluded from income/expense totals)
+    ("transfer_internal", "Internal Transfer", "transfers", "shared", None),
     # Debts
     ("debt_brother_yee", "Brother Yee", "debts", "dave", None),
     ("debt_sallie_mae", "Sallie Mae", "debts", "shared", None),
@@ -128,10 +146,20 @@ _SEED_RULES = [
     (r"24 HOUR FITNESS|24HF", "sub_gym", 5),
 ]
 
+# (id, name, balance, apr, minimum)
+_SEED_DEBTS = [
+    ("sallie_mae",    "Sallie Mae",           None, "0.117500", "262.04"),
+    ("sapphire_dave", "Joint Sapphire (Dave)", None, "0.267400", "200.00"),
+    ("sapphire_cam",  "Joint Sapphire (Cam)",  None, "0.246500", "200.00"),
+    ("tesla_model3",  "Tesla Model 3",          None, None,       "758.29"),
+    ("honda_civic",   "Honda Civic",            None, None,       "340.46"),
+    ("fidelity_401k", "401k Fidelity Loan",     None, None,       "345.12"),
+]
+
 
 def get_connection(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
@@ -142,6 +170,11 @@ def init_db(db_path: Path) -> sqlite3.Connection:
     conn = get_connection(db_path)
     conn.executescript(_SCHEMA)
     _seed_if_empty(conn)
+    _seed_transfers_if_missing(conn)
+    _seed_debts_if_empty(conn)
+    _migrate_debt_category_column(conn)
+    _migrate_debt_category_links(conn)
+    _seed_savings_trackers_if_empty(conn)
     conn.commit()
     return conn
 
@@ -161,4 +194,62 @@ def _seed_if_empty(conn: sqlite3.Connection) -> None:
     conn.executemany(
         "INSERT OR IGNORE INTO categorization_rules (pattern, category_id, priority) VALUES (?,?,?)",
         _SEED_RULES,
+    )
+
+
+def _seed_transfers_if_missing(conn: sqlite3.Connection) -> None:
+    exists = conn.execute(
+        "SELECT COUNT(*) FROM categories WHERE bucket = 'transfers'"
+    ).fetchone()[0]
+    if exists:
+        return
+    conn.execute(
+        "INSERT OR IGNORE INTO categories (id, name, bucket, owner, budget_amount) VALUES (?,?,?,?,?)",
+        ("transfer_internal", "Internal Transfer", "transfers", "shared", None),
+    )
+
+
+def _migrate_debt_category_column(conn: sqlite3.Connection) -> None:
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(debts)").fetchall()]
+    if "category_id" not in cols:
+        conn.execute("ALTER TABLE debts ADD COLUMN category_id TEXT")
+    if "months_remaining" not in cols:
+        conn.execute("ALTER TABLE debts ADD COLUMN months_remaining INTEGER")
+
+
+def _migrate_debt_category_links(conn: sqlite3.Connection) -> None:
+    links = [
+        ("honda_civic",   "debt_honda"),
+        ("tesla_model3",  "debt_tesla"),
+        ("sallie_mae",    "debt_sallie_mae"),
+        ("sapphire_dave", "debt_sapphire_dave"),
+        ("sapphire_cam",  "debt_sapphire_cam"),
+        ("fidelity_401k", "debt_401k_loan"),
+    ]
+    for debt_id, cat_id in links:
+        conn.execute(
+            "UPDATE debts SET category_id = ? WHERE id = ? AND category_id IS NULL",
+            (cat_id, debt_id),
+        )
+
+
+def _seed_savings_trackers_if_empty(conn: sqlite3.Connection) -> None:
+    if conn.execute("SELECT COUNT(*) FROM savings_trackers").fetchone()[0] > 0:
+        return
+    conn.executemany(
+        "INSERT OR IGNORE INTO savings_trackers (id, name, balance, category_id) VALUES (?,?,?,?)",
+        [
+            ("tracker_marcus",   "Marcus HYSA",  "0", "sav_marcus"),
+            ("tracker_baby",     "Baby Funds",   "0", "sav_baby"),
+            ("tracker_orejana",  "Orejana Bach", "0", "sav_orejana"),
+        ],
+    )
+
+
+def _seed_debts_if_empty(conn: sqlite3.Connection) -> None:
+    if conn.execute("SELECT COUNT(*) FROM debts").fetchone()[0] > 0:
+        return
+    conn.executemany(
+        "INSERT OR IGNORE INTO debts (id, name, balance, apr, minimum) VALUES (?,?,?,?,?)",
+        _SEED_DEBTS,
     )
