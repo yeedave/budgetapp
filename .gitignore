@@ -39,3 +39,6 @@ frontend/node_modules/
 # Env files
 .env
 .env.*
+
+# Claude Code local config (contains personal session data)
+.claude/
