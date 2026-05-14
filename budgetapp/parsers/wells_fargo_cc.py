@@ -6,10 +6,10 @@ from pathlib import Path
 import pandas as pd
 import pdfplumber
 
-from .base import AbstractParser, TRANSACTION_COLUMNS
+from .base import AbstractParser, TRANSACTION_COLUMNS, year_for_tx
 
 # "Statement Period 03/28/2026 to 04/26/2026"
-_PERIOD = re.compile(r"Statement Period \d{2}/\d{2}/(\d{4})")
+_PERIOD = re.compile(r"Statement Period \d{2}/\d{2}/\d{4} to (\d{2})/\d{2}/(\d{4})")
 
 # Transaction line — three variants handled by one pattern:
 #   Payments:   04/02 04/02 7446539FQ0XSL... ONLINE ACH PAYMENT THANK YOU 2,000.00
@@ -37,19 +37,19 @@ class WellsFargoCCParser(AbstractParser):
             for page in pdf.pages:
                 lines.extend((page.extract_text() or "").splitlines())
 
-        year = self._extract_year(lines)
-        rows = self._extract_transactions(lines, year)
+        year, end_month = self._extract_year(lines)
+        rows = self._extract_transactions(lines, year, end_month)
         df = pd.DataFrame(rows, columns=TRANSACTION_COLUMNS)
         return self.validate(df)
 
-    def _extract_year(self, lines: list[str]) -> int:
+    def _extract_year(self, lines: list[str]) -> tuple[int, int]:
         for line in lines:
             m = _PERIOD.search(line)
             if m:
-                return int(m.group(1))
+                return int(m.group(2)), int(m.group(1))  # end year, end month
         raise ValueError("Could not find statement period in PDF")
 
-    def _extract_transactions(self, lines: list[str], year: int) -> list[dict]:
+    def _extract_transactions(self, lines: list[str], year: int, end_month: int) -> list[dict]:
         rows: list[dict] = []
         is_credit = False
 
@@ -69,7 +69,7 @@ class WellsFargoCCParser(AbstractParser):
 
             date_str, desc, amount_str = m.group(1), m.group(2), m.group(3)
             month, day = int(date_str[:2]), int(date_str[3:])
-            tx_date = date(year, month, day)
+            tx_date = date(year_for_tx(year, end_month, month), month, day)
             amount = Decimal(amount_str.replace(",", ""))
             if not is_credit:
                 amount = -amount

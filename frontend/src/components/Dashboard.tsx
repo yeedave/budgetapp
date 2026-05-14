@@ -35,6 +35,19 @@ export default function Dashboard({ transactions, categories }: Props) {
     categories.filter((c) => c.bucket === 'transfers').map((c) => c.id)
   )
 
+  // ── Income by owner (Dave vs Cam) ────────────────────────────────
+  const incomeCatByOwner = Object.fromEntries(
+    categories.filter((c) => c.bucket === 'income').map((c) => [c.id, c.owner])
+  )
+  const incomeByOwner: Record<string, number> = {}
+  for (const tx of transactions) {
+    if (!tx.category_id) continue
+    const owner = incomeCatByOwner[tx.category_id]
+    if (!owner) continue
+    const n = parseFloat(tx.amount)
+    if (n > 0) incomeByOwner[owner] = (incomeByOwner[owner] ?? 0) + n
+  }
+
   // ── Summary numbers ───────────────────────────────────────────────
   let income = 0, expenses = 0, uncategorized = 0
   for (const tx of transactions) {
@@ -61,11 +74,10 @@ export default function Dashboard({ transactions, categories }: Props) {
       const budget = parseFloat(c.budget_amount!)
       const actual = byCategory[c.id] ?? 0
       // For income: positive is good. For expenses: negative actual is spending.
-      const isIncome = c.bucket === 'income'
-      const spent = isIncome ? actual : Math.abs(actual)
+      const spent = c.bucket === 'income' ? actual : Math.abs(actual)
       const pct = budget > 0 ? Math.min((spent / budget) * 100, 100) : 0
       const over = spent > budget
-      return { cat: c, budget, spent, pct, over, isIncome }
+      return { cat: c, budget, spent, pct, over }
     })
     .sort((a, b) => {
       // Sort: over budget first, then by % used desc
@@ -160,6 +172,25 @@ export default function Dashboard({ transactions, categories }: Props) {
         />
       </div>
 
+      {/* ── Income by earner ────────────────────────────────────── */}
+      {Object.keys(incomeByOwner).length > 1 && (
+        <div className="bg-white rounded-lg border divide-y">
+          <div className="px-5 py-3 flex items-center gap-2 text-sm font-semibold text-gray-500 uppercase tracking-wider">
+            Income by Earner
+            <HelpTooltip text="Breakdown of income by earner, based on the owner field of your income categories. Set in the Categories tab." />
+          </div>
+          <div className="px-5 py-4 flex gap-6 flex-wrap">
+            {Object.entries(incomeByOwner).map(([owner, amt]) => (
+              <div key={owner} className="flex flex-col gap-1">
+                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider capitalize">{owner}</div>
+                <div className="text-xl font-bold text-green-600 tabular-nums">{fmt.format(amt)}</div>
+                <div className="text-xs text-gray-400">{income > 0 ? Math.round((amt / income) * 100) : 0}% of total</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── Budget tracker ───────────────────────────────────────── */}
       {budgetRows.length > 0 && (
         <div className="bg-white rounded-lg border divide-y">
@@ -167,7 +198,7 @@ export default function Dashboard({ transactions, categories }: Props) {
             Budget Tracker
             <HelpTooltip text="Compares actual spending to the budget you set for each category. Green = under 80%, amber = 80–100%, red = over budget. Set budgets in the Categories tab." />
           </div>
-          {budgetRows.map(({ cat, budget, spent, pct, over, isIncome }) => {
+          {budgetRows.map(({ cat, budget, spent, pct, over }) => {
             const remaining = budget - spent
             const barColor = over
               ? 'bg-red-400'

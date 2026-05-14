@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 import pdfplumber
 
-from .base import AbstractParser, TRANSACTION_COLUMNS
+from .base import AbstractParser, TRANSACTION_COLUMNS, year_for_tx
 
 # Matches: 03/24  <description>  1,200.00  2,873.24
 #      or: 03/27  -373.00  2,500.24
@@ -32,21 +32,20 @@ class ChaseCheckingParser(AbstractParser):
             for page in pdf.pages:
                 full_text += (page.extract_text() or "") + "\n"
 
-        year = self._extract_year(full_text)
-        rows = self._extract_transactions(full_text, year)
+        year, end_month = self._extract_year(full_text)
+        rows = self._extract_transactions(full_text, year, end_month)
         df = pd.DataFrame(rows, columns=TRANSACTION_COLUMNS)
         return self.validate(df)
 
-    def _extract_year(self, text: str) -> int:
+    def _extract_year(self, text: str) -> tuple[int, int]:
         m = _PERIOD.search(text)
         if not m:
             raise ValueError("Could not find statement period in PDF")
-        # Use the end date's year (handles Dec→Jan cross-year edge case)
         from datetime import datetime
         end_date = datetime.strptime(m.group(2).strip(), "%B %d, %Y")
-        return end_date.year
+        return end_date.year, end_date.month
 
-    def _extract_transactions(self, text: str, year: int) -> list[dict]:
+    def _extract_transactions(self, text: str, year: int, end_month: int) -> list[dict]:
         # Pull out only the transaction detail block
         block_match = re.search(
             r"\*start\*transaction detail(.+?)\*end\*transaction detail",
@@ -69,7 +68,7 @@ class ChaseCheckingParser(AbstractParser):
                 continue
 
             month, day = int(raw_date[:2]), int(raw_date[3:])
-            tx_date = date(year, month, day)
+            tx_date = date(year_for_tx(year, end_month, month), month, day)
 
             raw_desc = raw_desc.strip()
             clean_desc = _DUP_DATE.sub("", raw_desc).strip()

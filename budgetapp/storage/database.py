@@ -69,92 +69,111 @@ CREATE TABLE IF NOT EXISTS savings_trackers (
     balance     TEXT NOT NULL DEFAULT '0',
     category_id TEXT
 );
+
+CREATE TABLE IF NOT EXISTS xp_events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    debt_id    TEXT    NOT NULL,
+    amount     TEXT    NOT NULL,
+    source     TEXT    NOT NULL,  -- 'payment' | 'payoff'
+    created_at TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS import_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id  TEXT NOT NULL,
+    filename    TEXT NOT NULL,
+    imported_at TEXT NOT NULL,
+    inserted    INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS assets (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    value       TEXT NOT NULL DEFAULT '0',
+    asset_type  TEXT NOT NULL DEFAULT 'other',
+    updated_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS splits (
+    id              TEXT PRIMARY KEY,
+    tx_id           TEXT NOT NULL REFERENCES transactions(id),
+    description     TEXT NOT NULL,
+    owed_by         TEXT NOT NULL,
+    amount_owed     TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    settled_tx_id   TEXT,
+    created_at      TEXT NOT NULL
+);
 """
 
-# Seed accounts matching known bank statements
+_MIGRATIONS = """
+ALTER TABLE transactions ADD COLUMN is_manual INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE savings_trackers ADD COLUMN goal_amount TEXT;
+ALTER TABLE savings_trackers ADD COLUMN monthly_contribution TEXT;
+"""
+
+# Seed accounts — one per supported parser.
+# "owner" is a free-text label users can customize; these are generic defaults.
 _SEED_ACCOUNTS = [
-    ("chase_checking", "Chase Total Checking", "chase", "checking", "dave"),
-    ("chase_sapphire", "Chase Sapphire (Joint)", "chase", "credit", "joint"),
-    ("wells_fargo_cc", "Wells Fargo Credit Card", "wells_fargo", "credit", "dave"),
-    ("apple_card", "Apple Card", "apple", "credit", "dave"),
-    ("marcus_hysa", "Marcus High-Yield Savings", "marcus", "savings", "dave"),
+    ("chase_checking", "Chase Checking", "chase", "checking", "primary"),
+    ("chase_sapphire", "Chase Sapphire", "chase", "credit", "joint"),
+    ("wells_fargo_cc", "Wells Fargo CC", "wells_fargo", "credit", "primary"),
+    ("wells_fargo_checking", "Wells Fargo Checking", "wells_fargo", "checking", "primary"),
+    ("apple_card", "Apple Card", "apple", "credit", "primary"),
+    ("marcus_hysa", "Marcus High-Yield Savings", "marcus", "savings", "primary"),
 ]
 
 # (id, name, bucket, owner, budget_amount)
+# Generic household budget template — no personal names or amounts.
 _SEED_CATEGORIES = [
     # Income
-    ("income_dave", "Dave's Income", "income", "dave", None),
-    ("income_cam", "Cam's Income", "income", "cam", None),
+    ("income_primary", "Primary Income", "income", "primary", None),
+    ("income_partner", "Partner Income", "income", "partner", None),
+    ("income_other", "Other Income", "income", "shared", None),
     # Bills
-    ("bills_internet", "Internet/Spectrum", "bills", "shared", "61.25"),
-    ("bills_rent", "Casa Grande Rent", "bills", "shared", "2492.88"),
+    ("bills_rent", "Rent/Mortgage", "bills", "shared", None),
+    ("bills_internet", "Internet", "bills", "shared", None),
+    ("bills_utilities", "Utilities", "bills", "shared", None),
     ("bills_auto_insurance", "Auto Insurance", "bills", "shared", None),
-    ("bills_electricity", "Electricity", "bills", "shared", None),
-    ("bills_tithes", "Tithes/Offering", "bills", "shared", None),
+    ("bills_phone", "Phone", "bills", "shared", None),
     # Subscriptions
-    ("sub_netflix", "Netflix", "subscriptions", "shared", None),
-    ("sub_spotify_hulu", "Spotify/Hulu", "subscriptions", "shared", None),
-    ("sub_icloud_dave", "Apple iCloud (Dave)", "subscriptions", "dave", None),
-    ("sub_icloud_cam", "Apple iCloud (Cam)", "subscriptions", "cam", None),
-    ("sub_pandora", "Pandora", "subscriptions", "shared", None),
-    ("sub_gym", "24 Hour Fitness", "subscriptions", "shared", None),
-    ("sub_youtube", "YouTube", "subscriptions", "shared", None),
-    ("sub_car_wash", "Chemical Guys Car Wash", "subscriptions", "dave", None),
-    ("sub_cook_group", "IG Cook Group", "subscriptions", "shared", None),
-    ("sub_tesla", "Tesla Subscription", "subscriptions", "dave", None),
+    ("sub_streaming_video", "Streaming (Video)", "subscriptions", "shared", None),
+    ("sub_streaming_music", "Streaming (Music)", "subscriptions", "shared", None),
+    ("sub_cloud_storage", "Cloud Storage", "subscriptions", "shared", None),
+    ("sub_gym", "Gym / Fitness", "subscriptions", "shared", None),
+    ("sub_other", "Other Subscriptions", "subscriptions", "shared", None),
     # Expenses
     ("exp_groceries", "Groceries", "expenses", "shared", None),
-    ("exp_gas", "Gas/Charge", "expenses", "shared", None),
-    ("exp_dave_budget", "Dave's Budget", "expenses", "dave", None),
-    ("exp_cam_budget", "Cam's Budget", "expenses", "cam", None),
-    ("exp_date_night", "Date Night", "expenses", "joint", None),
-    ("exp_pets", "Pets", "expenses", "shared", None),
-    ("exp_fast_food", "Fast Food", "expenses", "shared", None),
+    ("exp_gas", "Gas / Transportation", "expenses", "shared", None),
+    ("exp_dining", "Dining Out", "expenses", "shared", None),
+    ("exp_personal_1", "Personal Budget (1)", "expenses", "primary", None),
+    ("exp_personal_2", "Personal Budget (2)", "expenses", "partner", None),
     ("exp_medical", "Medical", "expenses", "shared", None),
-    ("exp_essentials", "Essentials", "expenses", "shared", None),
+    ("exp_pets", "Pets", "expenses", "shared", None),
     ("exp_cc_interest", "CC Interest", "expenses", "shared", None),
-    ("exp_misc", "MISC", "expenses", "shared", None),
+    ("exp_misc", "Misc", "expenses", "shared", None),
     # Savings
-    ("sav_marcus", "Marcus HYSA", "savings", "dave", None),
-    ("sav_baby", "Baby Funds", "savings", "joint", None),
-    ("sav_orejana", "Orejana Bach", "savings", "joint", None),
+    ("sav_hysa", "High-Yield Savings", "savings", "shared", None),
+    ("sav_emergency", "Emergency Fund", "savings", "shared", None),
     # Transfers (excluded from income/expense totals)
     ("transfer_internal", "Internal Transfer", "transfers", "shared", None),
-    # Debts
-    ("debt_brother_yee", "Brother Yee", "debts", "dave", None),
-    ("debt_sallie_mae", "Sallie Mae", "debts", "shared", None),
-    ("debt_sapphire_dave", "Joint Sapphire (Dave)", "debts", "dave", None),
-    ("debt_sapphire_cam", "Joint Sapphire (Cam)", "debts", "cam", None),
-    ("debt_honda", "Honda Civic", "debts", "dave", None),
-    ("debt_tesla", "Tesla Model 3", "debts", "dave", None),
-    ("debt_401k_loan", "401k Fidelity Loan", "debts", "dave", None),
 ]
 
-# (pattern, category_id, priority)  — applied case-insensitively to description
+# (pattern, category_id, priority) — universally recognizable merchants only
 _SEED_RULES = [
-    (r"SPECTRUM|SPECTRUM SPECTRUM", "bills_internet", 10),
-    (r"DOMUSO", "bills_rent", 10),
-    (r"HONDA PMT|HONDA CIVIC", "debt_honda", 10),
-    (r"TESLA INC|TESLA MOTO", "debt_tesla", 10),
-    (r"SALLIE MAE", "debt_sallie_mae", 10),
-    (r"INTELLISENSE SYS PAYROLL", "income_dave", 10),
-    (r"PAYMENT TO CHASE CARD.*7734", "debt_sapphire_dave", 10),
-    (r"NETFLIX", "sub_netflix", 5),
-    (r"SPOTIFY", "sub_spotify_hulu", 5),
-    (r"APPLE\.COM/BILL|APPLE ICLOUD", "sub_icloud_dave", 5),
-    (r"YOUTUBE", "sub_youtube", 5),
-    (r"24 HOUR FITNESS|24HF", "sub_gym", 5),
+    (r"NETFLIX", "sub_streaming_video", 5),
+    (r"HULU|DISNEY\+|HBO MAX|PEACOCK|PARAMOUNT", "sub_streaming_video", 5),
+    (r"SPOTIFY|PANDORA|APPLE MUSIC|TIDAL", "sub_streaming_music", 5),
+    (r"APPLE\.COM/BILL|APPLE ICLOUD|GOOGLE ONE|GOOGLE STORAGE", "sub_cloud_storage", 5),
+    (r"YOUTUBE", "sub_streaming_video", 5),
+    (r"24 HOUR FITNESS|24HF|PLANET FITNESS|EQUINOX|LA FITNESS", "sub_gym", 5),
+    # HYSA interest — matches "Interest", "Interest Paid", "APY Interest", etc.
+    # Does NOT match "PURCHASE INTEREST CHARGE" (credit card interest) due to word boundary + short desc
+    (r"^(?:APY\s+)?Interest(?:\s+Paid)?$", "sav_hysa", 8),
 ]
 
-# (id, name, balance, apr, minimum)
-_SEED_DEBTS = [
-    ("sallie_mae",    "Sallie Mae",           None, "0.117500", "262.04"),
-    ("sapphire_dave", "Joint Sapphire (Dave)", None, "0.267400", "200.00"),
-    ("sapphire_cam",  "Joint Sapphire (Cam)",  None, "0.246500", "200.00"),
-    ("tesla_model3",  "Tesla Model 3",          None, None,       "758.29"),
-    ("honda_civic",   "Honda Civic",            None, None,       "340.46"),
-    ("fidelity_401k", "401k Fidelity Loan",     None, None,       "345.12"),
-]
+# Fresh installs start with no pre-filled debts — users add their own.
+_SEED_DEBTS: list = []
 
 
 def get_connection(db_path: Path) -> sqlite3.Connection:
@@ -175,6 +194,13 @@ def init_db(db_path: Path) -> sqlite3.Connection:
     _migrate_debt_category_column(conn)
     _migrate_debt_category_links(conn)
     _seed_savings_trackers_if_empty(conn)
+    _migrate_columns(conn)
+    _migrate_xp(conn)
+    _migrate_wf_checking_account(conn)
+    _migrate_interest_rule(conn)
+    _migrate_due_day(conn)
+    _migrate_account_customization(conn)
+    _migrate_import_log(conn)
     conn.commit()
     return conn
 
@@ -236,13 +262,80 @@ def _migrate_debt_category_links(conn: sqlite3.Connection) -> None:
 def _seed_savings_trackers_if_empty(conn: sqlite3.Connection) -> None:
     if conn.execute("SELECT COUNT(*) FROM savings_trackers").fetchone()[0] > 0:
         return
+    # Fresh installs start with one generic tracker — users add/rename their own.
     conn.executemany(
         "INSERT OR IGNORE INTO savings_trackers (id, name, balance, category_id) VALUES (?,?,?,?)",
         [
-            ("tracker_marcus",   "Marcus HYSA",  "0", "sav_marcus"),
-            ("tracker_baby",     "Baby Funds",   "0", "sav_baby"),
-            ("tracker_orejana",  "Orejana Bach", "0", "sav_orejana"),
+            ("tracker_hysa", "High-Yield Savings", "0", "sav_hysa"),
         ],
+    )
+
+
+def _migrate_columns(conn: sqlite3.Connection) -> None:
+    tx_cols = [r[1] for r in conn.execute("PRAGMA table_info(transactions)").fetchall()]
+    if "is_manual" not in tx_cols:
+        conn.execute("ALTER TABLE transactions ADD COLUMN is_manual INTEGER NOT NULL DEFAULT 0")
+
+    sav_cols = [r[1] for r in conn.execute("PRAGMA table_info(savings_trackers)").fetchall()]
+    if "goal_amount" not in sav_cols:
+        conn.execute("ALTER TABLE savings_trackers ADD COLUMN goal_amount TEXT")
+    if "monthly_contribution" not in sav_cols:
+        conn.execute("ALTER TABLE savings_trackers ADD COLUMN monthly_contribution TEXT")
+
+
+def _migrate_xp(conn: sqlite3.Connection) -> None:
+    # xp_events created via schema IF NOT EXISTS — nothing extra needed yet
+    pass
+
+
+def _migrate_interest_rule(conn: sqlite3.Connection) -> None:
+    """Ensure the HYSA interest categorization rule exists — only if sav_hysa category is present."""
+    pattern = r"^(?:APY\s+)?Interest(?:\s+Paid)?$"
+    has_cat = conn.execute(
+        "SELECT COUNT(*) FROM categories WHERE id = 'sav_hysa'"
+    ).fetchone()[0]
+    if not has_cat:
+        return
+    exists = conn.execute(
+        "SELECT COUNT(*) FROM categorization_rules WHERE pattern = ?", (pattern,)
+    ).fetchone()[0]
+    if not exists:
+        conn.execute(
+            "INSERT INTO categorization_rules (pattern, category_id, priority) VALUES (?,?,?)",
+            (pattern, "sav_hysa", 8),
+        )
+
+
+def _migrate_import_log(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS import_log (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            account_id  TEXT NOT NULL,
+            filename    TEXT NOT NULL,
+            imported_at TEXT NOT NULL,
+            inserted    INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+
+
+def _migrate_account_customization(conn: sqlite3.Connection) -> None:
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(accounts)").fetchall()]
+    if "color" not in cols:
+        conn.execute("ALTER TABLE accounts ADD COLUMN color TEXT")
+    if "sort_order" not in cols:
+        conn.execute("ALTER TABLE accounts ADD COLUMN sort_order INTEGER")
+
+
+def _migrate_due_day(conn: sqlite3.Connection) -> None:
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(debts)").fetchall()]
+    if "due_day" not in cols:
+        conn.execute("ALTER TABLE debts ADD COLUMN due_day INTEGER")
+
+
+def _migrate_wf_checking_account(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO accounts (id, name, bank, account_type, owner) VALUES (?,?,?,?,?)",
+        ("wells_fargo_checking", "Wells Fargo Checking", "wells_fargo", "checking", "primary"),
     )
 
 

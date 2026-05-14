@@ -15,3 +15,6 @@ FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
 APP_NAME = "BudgetApp"
 APP_WIDTH = 1400
 APP_HEIGHT = 900
+
+BACKUP_DIR = PROJECT_ROOT / "data" / "backups"
+SETTINGS_FILE = PROJECT_ROOT / "data" / "settings.json"

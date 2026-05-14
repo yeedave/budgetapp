@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import type { Account, Category, Transaction, ImportResult } from './types'
-import { getAccounts, getCategories, getTransactions, importStatement, setCategory } from './api'
+import { getAccounts, getCategories, getTransactions, setCategory, addTransaction, deleteTransaction } from './api'
 import Sidebar from './components/Sidebar'
 import TransactionTable from './components/TransactionTable'
 import ImportBar from './components/ImportBar'
@@ -8,8 +8,12 @@ import Dashboard from './components/Dashboard'
 import DebtManager from './components/DebtManager'
 import CategoryManager from './components/CategoryManager'
 import AccountManager from './components/AccountManager'
+import SettingsManager from './components/SettingsManager'
+import ProgressTab from './components/ProgressTab'
+import Calculator from './components/Calculator'
+import SplitsManager from './components/SplitsManager'
 
-type View = 'dashboard' | 'transactions' | 'debts' | 'categories' | 'accounts'
+type View = 'dashboard' | 'transactions' | 'debts' | 'categories' | 'accounts' | 'calculator' | 'progress' | 'splits' | 'settings'
 
 function usePywebviewReady() {
   const [ready, setReady] = useState(!!window.pywebview?.api)
@@ -22,7 +26,7 @@ function usePywebviewReady() {
   return ready
 }
 
-const VALID_VIEWS: View[] = ['dashboard', 'transactions', 'debts', 'categories', 'accounts']
+const VALID_VIEWS: View[] = ['dashboard', 'transactions', 'debts', 'categories', 'accounts', 'calculator', 'progress', 'splits', 'settings']
 
 function persist(key: string, value: string) {
   try { localStorage.setItem(key, value) } catch { /* ignore */ }
@@ -56,22 +60,41 @@ export default function App() {
 
   const loadTransactions = useCallback(() => {
     if (!ready) return
-    getTransactions(selectedAccount, selectedMonth).then(setAllTransactions)
-  }, [ready, selectedAccount, selectedMonth])
+    getTransactions('', '').then(setAllTransactions)
+  }, [ready])
 
   useEffect(() => { loadTransactions() }, [loadTransactions])
 
-  const handleImport = async (accountId: string): Promise<ImportResult> => {
-    const result = await importStatement(accountId)
-    if (result.inserted > 0) loadTransactions()
-    return result
+  const displayedTransactions = useMemo(() => {
+    let txs = allTransactions
+    if (selectedAccount) txs = txs.filter((t) => t.account_id === selectedAccount)
+    if (selectedMonth)   txs = txs.filter((t) => t.date.slice(0, 7) === selectedMonth)
+    return txs
+  }, [allTransactions, selectedAccount, selectedMonth])
+
+  const handleImport = (_result: ImportResult) => {
+    loadTransactions()
   }
 
   const handleSetCategory = async (txId: string, categoryId: string) => {
-    await setCategory(txId, categoryId)
+    const { updated_ids } = await setCategory(txId, categoryId)
+    const idSet = new Set(updated_ids)
     setAllTransactions((prev) =>
-      prev.map((t) => (t.id === txId ? { ...t, category_id: categoryId || null } : t)),
+      prev.map((t) => idSet.has(t.id) ? { ...t, category_id: categoryId || null } : t),
     )
+  }
+
+  const handleAddTransaction = async (
+    date: string, description: string, amount: string,
+    accountId: string, categoryId: string,
+  ) => {
+    const tx = await addTransaction(date, description, amount, accountId, categoryId)
+    setAllTransactions((prev) => [tx, ...prev].sort((a, b) => b.date.localeCompare(a.date)))
+  }
+
+  const handleDeleteTransaction = async (txId: string) => {
+    await deleteTransaction(txId)
+    setAllTransactions((prev) => prev.filter((t) => t.id !== txId))
   }
 
   if (!ready) {
@@ -89,7 +112,7 @@ export default function App() {
         <span className="font-semibold text-gray-900 mr-4 py-3">BudgetApp</span>
 
         {/* Tabs */}
-        {(['dashboard', 'transactions', 'debts', 'categories', 'accounts'] as View[]).map((v) => (
+        {(['dashboard', 'transactions', 'debts', 'categories', 'accounts', 'calculator', 'progress', 'splits', 'settings'] as View[]).map((v) => (
           <button
             key={v}
             onClick={() => handleViewChange(v)}
@@ -119,13 +142,23 @@ export default function App() {
         />
         <main className="flex-1 overflow-auto">
           {view === 'dashboard' && (
-            <Dashboard transactions={allTransactions} categories={categories} />
+            <Dashboard transactions={displayedTransactions} categories={categories} />
           )}
           {view === 'transactions' && (
             <TransactionTable
-              transactions={allTransactions}
+              transactions={displayedTransactions}
               categories={categories}
+              accounts={accounts}
               onSetCategory={handleSetCategory}
+              onAddTransaction={handleAddTransaction}
+              onDeleteTransaction={handleDeleteTransaction}
+              onBulkDeleted={(start, end, accountId) => {
+                setAllTransactions((prev) => prev.filter((t) => {
+                  const inRange = t.date >= start && t.date <= end
+                  const matchesAccount = !accountId || t.account_id === accountId
+                  return !(inRange && matchesAccount)
+                }))
+              }}
             />
           )}
           {view === 'debts' && <DebtManager categories={categories} />}
@@ -141,6 +174,10 @@ export default function App() {
               onAccountsChange={setAccounts}
             />
           )}
+          {view === 'calculator' && <Calculator />}
+          {view === 'progress' && <ProgressTab />}
+          {view === 'splits' && <SplitsManager />}
+          {view === 'settings' && <SettingsManager />}
         </main>
       </div>
     </div>

@@ -1,6 +1,6 @@
-import { useState, useRef } from 'react'
-import type { Category } from '../types'
-import { addCategory, deleteCategory, setCategoryBudget } from '../api'
+import { useState, useRef, useEffect } from 'react'
+import type { Category, Rule } from '../types'
+import { addCategory, deleteCategory, setCategoryBudget, getRules, saveRule, deleteRule } from '../api'
 import HelpTooltip from './HelpTooltip'
 
 const BUCKET_ORDER = ['income', 'bills', 'subscriptions', 'expenses', 'savings', 'debts', 'transfers']
@@ -22,6 +22,13 @@ export default function CategoryManager({ categories, onCategoriesChange }: Prop
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  const [rules, setRules] = useState<Rule[]>([])
+  const [rulePattern, setRulePattern] = useState('')
+  const [ruleCategoryId, setRuleCategoryId] = useState('')
+  const [ruleSaving, setRuleSaving] = useState(false)
+
+  useEffect(() => { getRules().then(setRules) }, [])
 
   // Track budget input values locally; key = category id
   const [budgetInputs, setBudgetInputs] = useState<Record<string, string>>(() =>
@@ -50,6 +57,22 @@ export default function CategoryManager({ categories, onCategoriesChange }: Prop
     const result = await deleteCategory(cat.id)
     if (!result.ok) { setDeleteError(result.error ?? 'Could not delete category.'); return }
     onCategoriesChange(categories.filter((c) => c.id !== cat.id))
+  }
+
+  const handleAddRule = async () => {
+    if (!rulePattern.trim() || !ruleCategoryId) return
+    setRuleSaving(true)
+    const rule = await saveRule(rulePattern.trim(), ruleCategoryId)
+    const cat = categories.find((c) => c.id === ruleCategoryId)
+    setRules((prev) => [...prev, { ...rule, category_name: cat?.name ?? null }]
+      .sort((a, b) => b.priority - a.priority || a.id - b.id))
+    setRulePattern('')
+    setRuleSaving(false)
+  }
+
+  const handleDeleteRule = async (ruleId: number) => {
+    await deleteRule(ruleId)
+    setRules((prev) => prev.filter((r) => r.id !== ruleId))
   }
 
   const handleBudgetBlur = async (cat: Category) => {
@@ -180,6 +203,90 @@ export default function CategoryManager({ categories, onCategoriesChange }: Prop
           </div>
         ))}
       </div>
+      {/* ── Categorization Rules ──────────────────────────────────── */}
+      <div className="bg-white rounded-lg border">
+        <div className="px-5 py-3 border-b flex items-center gap-2">
+          <span className="text-sm font-semibold text-gray-500 uppercase tracking-wider">Categorization Rules</span>
+          <HelpTooltip text="Rules auto-assign a category when a transaction description matches the pattern. Patterns are case-insensitive regular expressions — use .* to match anything in between words. The app learns rules automatically when you categorize transactions manually; you can also create them here for recurring transfers." />
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          {/* Add rule form */}
+          <div className="flex flex-wrap gap-2 items-end">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-gray-400">
+                Pattern <span className="font-normal text-gray-300">(regex, case-insensitive)</span>
+              </label>
+              <input
+                className="border rounded px-2 py-1.5 text-sm w-64 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                placeholder="e.g. Online Transfer.*Way2Save"
+                value={rulePattern}
+                onChange={(e) => setRulePattern(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddRule()}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-gray-400">Category</label>
+              <select
+                className="border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                value={ruleCategoryId}
+                onChange={(e) => setRuleCategoryId(e.target.value)}
+              >
+                <option value="">— select —</option>
+                {BUCKET_ORDER.filter((b) => byBucket[b].length > 0).map((b) => (
+                  <optgroup key={b} label={BUCKET_LABEL[b]}>
+                    {byBucket[b].map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={handleAddRule}
+              disabled={!rulePattern.trim() || !ruleCategoryId || ruleSaving}
+              className="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+            >
+              {ruleSaving ? 'Adding…' : 'Add Rule'}
+            </button>
+          </div>
+
+          {/* Rule list */}
+          {rules.length === 0 ? (
+            <p className="text-sm text-gray-400 italic">
+              No rules yet. Categorize a transaction manually and the app learns it automatically,
+              or add a rule above for recurring transfers.
+            </p>
+          ) : (
+            <div className="divide-y border rounded overflow-hidden">
+              <div className="grid grid-cols-[1fr_auto_1fr_auto] gap-x-3 px-3 py-1.5 bg-gray-50 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                <span>Pattern</span>
+                <span />
+                <span>Category</span>
+                <span />
+              </div>
+              {rules.map((rule) => (
+                <div key={rule.id} className="grid grid-cols-[1fr_auto_1fr_auto] gap-x-3 items-center px-3 py-2 group hover:bg-gray-50">
+                  <code className="text-xs text-gray-700 font-mono truncate" title={rule.pattern}>
+                    {rule.pattern}
+                  </code>
+                  <span className="text-gray-300 text-xs">→</span>
+                  <span className="text-sm text-gray-600 truncate">
+                    {rule.category_name ?? <span className="text-red-400 italic">deleted category</span>}
+                  </span>
+                  <button
+                    onClick={() => handleDeleteRule(rule.id)}
+                    className="text-xs text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all px-1"
+                    title="Delete rule"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
     </div>
   )
 }

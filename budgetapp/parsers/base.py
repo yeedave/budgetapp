@@ -13,6 +13,19 @@ TRANSACTION_COLUMNS = [
 ]
 
 
+def year_for_tx(statement_year: int, statement_end_month: int, tx_month: int) -> int:
+    """Return the correct year for a MM/DD transaction date.
+
+    Bank statements can include transactions from the tail of the prior month.
+    A January 2026 statement may contain December 2025 charges.  If the tx
+    month is in Q4 (Oct–Dec) and the statement closes in Q1 (Jan–Mar) we know
+    the transaction belongs to the previous year.
+    """
+    if tx_month >= 10 and statement_end_month <= 3:
+        return statement_year - 1
+    return statement_year
+
+
 class AbstractParser(ABC):
     account_id: str  # subclasses declare this
 

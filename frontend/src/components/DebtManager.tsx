@@ -64,6 +64,7 @@ function rowToDebt(r: Row): DebtItem {
     minimum: r.minimum || null,
     category_id: null,
     months_remaining: r.months_remaining && !isNaN(mr) ? mr : null,
+    due_day: null,
   }
 }
 
@@ -181,7 +182,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
 
   const handleAddSavings = () => {
     const tempId = `__new_${Date.now()}`
-    const newTracker: SavingsTracker = { id: tempId, name: '', balance: '0', category_id: null }
+    const newTracker: SavingsTracker = { id: tempId, name: '', balance: '0', category_id: null, goal_amount: null, monthly_contribution: null }
     setSavings((prev) => [...prev, newTracker])
     setSavingsEdits((prev) => ({ ...prev, [tempId]: { name: '', balance: '0' } }))
   }
@@ -319,53 +320,158 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
             const name = edits.name ?? tracker.name
             const balance = edits.balance ?? tracker.balance
             const catId = edits.category_id !== undefined ? edits.category_id : tracker.category_id
+            const goal = edits.goal_amount !== undefined ? edits.goal_amount : (tracker.goal_amount ?? '')
+            const contrib = edits.monthly_contribution !== undefined ? edits.monthly_contribution : (tracker.monthly_contribution ?? '')
             const isDirty = Object.keys(edits).length > 0
+
+            const balNum = parseFloat(balance || '0')
+            const goalNum = parseFloat(goal || '0')
+            const contribNum = parseFloat(contrib || '0')
+            const pct = goal && goalNum > 0 ? Math.min((balNum / goalNum) * 100, 100) : 0
+            const monthsLeft = goal && goalNum > 0 && contribNum > 0 && balNum < goalNum
+              ? Math.ceil((goalNum - balNum) / contribNum)
+              : null
+
             return (
-              <div key={tracker.id} className="flex items-center gap-2">
-                <input
-                  className="w-36 border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 shrink-0"
-                  value={name}
-                  placeholder="Name"
-                  onChange={(e) => handleSavingsEdit(tracker.id, 'name', e.target.value)}
-                />
-                <div className="flex items-center border rounded overflow-hidden shrink-0 focus-within:ring-2 focus-within:ring-indigo-400">
-                  <span className="px-1.5 text-xs text-gray-400 bg-gray-50 border-r">$</span>
+              <div key={tracker.id} className="space-y-2 pb-3 border-b last:border-0">
+                {/* Row 1: name, balance, goal, category link */}
+                <div className="flex items-center gap-2 flex-wrap">
                   <input
-                    className="w-20 px-2 py-1 text-sm text-right focus:outline-none"
-                    value={balance}
-                    placeholder="0.00"
-                    onChange={(e) => handleSavingsEdit(tracker.id, 'balance', e.target.value)}
+                    className="w-32 border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 shrink-0"
+                    value={name}
+                    placeholder="Name"
+                    onChange={(e) => handleSavingsEdit(tracker.id, 'name', e.target.value)}
                   />
-                </div>
-                <select
-                  className="flex-1 border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                  value={catId ?? ''}
-                  onChange={(e) => handleSavingsEdit(tracker.id, 'category_id', e.target.value)}
-                >
-                  <option value="">— no link —</option>
-                  {savingsCategories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-                {isDirty && (
-                  <button
-                    onClick={() => handleSaveSavings(tracker)}
-                    className="text-xs px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors shrink-0"
+                  <div className="flex items-center border rounded overflow-hidden shrink-0 focus-within:ring-2 focus-within:ring-indigo-400" title="Current balance">
+                    <span className="px-1.5 text-xs text-gray-400 bg-gray-50 border-r">$</span>
+                    <input
+                      className="w-20 px-2 py-1 text-sm text-right focus:outline-none"
+                      value={balance}
+                      placeholder="0.00"
+                      onChange={(e) => handleSavingsEdit(tracker.id, 'balance', e.target.value)}
+                    />
+                  </div>
+                  <div className="flex items-center border rounded overflow-hidden shrink-0 focus-within:ring-2 focus-within:ring-indigo-400" title="Goal amount">
+                    <span className="px-1.5 text-xs text-gray-400 bg-gray-50 border-r whitespace-nowrap">Goal $</span>
+                    <input
+                      className="w-20 px-2 py-1 text-sm text-right focus:outline-none"
+                      value={goal ?? ''}
+                      placeholder="—"
+                      onChange={(e) => handleSavingsEdit(tracker.id, 'goal_amount', e.target.value)}
+                    />
+                  </div>
+                  <div className="flex items-center border rounded overflow-hidden shrink-0 focus-within:ring-2 focus-within:ring-indigo-400" title="Monthly contribution">
+                    <span className="px-1.5 text-xs text-gray-400 bg-gray-50 border-r whitespace-nowrap">+$/mo</span>
+                    <input
+                      className="w-20 px-2 py-1 text-sm text-right focus:outline-none"
+                      value={contrib ?? ''}
+                      placeholder="—"
+                      onChange={(e) => handleSavingsEdit(tracker.id, 'monthly_contribution', e.target.value)}
+                    />
+                  </div>
+                  <select
+                    className="flex-1 border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 min-w-[120px]"
+                    value={catId ?? ''}
+                    onChange={(e) => handleSavingsEdit(tracker.id, 'category_id', e.target.value)}
                   >
-                    Save
+                    <option value="">— no link —</option>
+                    {savingsCategories.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  {isDirty && (
+                    <button
+                      onClick={() => handleSaveSavings(tracker)}
+                      className="text-xs px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors shrink-0"
+                    >
+                      Save
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleDeleteSavings(tracker.id)}
+                    className="text-xs text-gray-400 hover:text-red-600 transition-colors px-1 shrink-0"
+                  >
+                    ✕
                   </button>
+                </div>
+
+                {/* Progress bar toward goal */}
+                {goalNum > 0 && (
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-green-500' : 'bg-indigo-400'}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <span className="text-xs tabular-nums text-gray-500 shrink-0 w-28 text-right">
+                      {fmt.format(balNum)} / {fmt.format(goalNum)}
+                    </span>
+                    {monthsLeft !== null && (
+                      <span className="text-xs text-indigo-500 shrink-0 w-28">
+                        ~{monthsLeft} mo to goal
+                      </span>
+                    )}
+                    {pct >= 100 && (
+                      <span className="text-xs text-green-600 font-semibold shrink-0">Goal reached!</span>
+                    )}
+                  </div>
                 )}
-                <button
-                  onClick={() => handleDeleteSavings(tracker.id)}
-                  className="text-xs text-gray-400 hover:text-red-600 transition-colors px-1 shrink-0"
-                >
-                  ✕
-                </button>
               </div>
             )
           })}
         </div>
       </div>
+
+      {/* ── Savings progress chart ───────────────────────────────── */}
+      {savings.length > 0 && (() => {
+        const chartData = savings.map((s) => {
+          const bal = parseFloat(s.balance || '0')
+          const goal = s.goal_amount ? parseFloat(s.goal_amount) : 0
+          return {
+            name: s.name,
+            balance: bal,
+            remaining: goal > 0 ? Math.max(0, goal - bal) : 0,
+            goal,
+          }
+        })
+        const maxVal = Math.max(...chartData.map((d) => Math.max(d.balance + d.remaining, 1)))
+        return (
+          <div className="bg-white rounded-lg border px-5 py-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-gray-500 uppercase tracking-wider">
+                Savings Progress
+                <HelpTooltip text="Current balance for each savings tracker. The light gray portion shows how much remains to reach your goal. Trackers without a goal show only the saved amount." />
+              </div>
+              <div className="text-right">
+                <div className="text-xs text-gray-400 uppercase tracking-wider">Total Saved</div>
+                <div className="text-lg font-semibold text-indigo-600">
+                  {fmt.format(savings.reduce((sum, s) => sum + parseFloat(s.balance || '0'), 0))}
+                </div>
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={chartData.length * 52 + 24}>
+              <BarChart layout="vertical" data={chartData} margin={{ top: 4, right: 60, bottom: 4, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                <XAxis type="number" domain={[0, maxVal]} tickFormatter={fmtK} tick={{ fontSize: 12 }} />
+                <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 12 }} />
+                <Tooltip
+                  formatter={(v, name) => [
+                    fmt.format(v as number),
+                    name === 'balance' ? 'Saved' : 'Remaining to Goal',
+                  ]}
+                />
+                <Bar dataKey="balance" fill="#6366f1" stackId="a" name="balance" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="remaining" fill="#e5e7eb" stackId="a" name="remaining" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+            <div className="flex items-center gap-4 mt-1 text-xs text-gray-400">
+              <span className="flex items-center gap-1"><span className="inline-block w-3 h-2 rounded-sm bg-indigo-500" /> Saved</span>
+              <span className="flex items-center gap-1"><span className="inline-block w-3 h-2 rounded-sm bg-gray-200" /> Remaining to Goal</span>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ── Debt table ────────────────────────────────────────────── */}
       <div className="bg-white rounded-lg border">

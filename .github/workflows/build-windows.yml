@@ -17,14 +17,33 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Python dependencies
         run: |
           pip install -e ".[dev]"
           pip install pyinstaller
 
+      - name: Build React frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
       - name: Run tests
         run: pytest
 
-      # TODO: Milestone 9 — add PyInstaller build step
-      # - name: Build .exe
-      #   run: pyinstaller budgetapp.spec
+      - name: Build .exe
+        run: pyinstaller budgetapp.spec
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BudgetApp-Windows
+          path: dist/BudgetApp/
+          retention-days: 30

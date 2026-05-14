@@ -28,18 +28,20 @@ def test_seed_accounts(repo):
 
 def test_seed_categories(repo):
     cats = repo.get_categories()
+    ids = {c.id for c in cats}
     names = {c.name for c in cats}
-    assert "Casa Grande Rent" in names
-    assert "Internet/Spectrum" in names
-    assert "Sallie Mae" in names
-    assert len(cats) >= 30
+    assert "bills_rent" in ids
+    assert "bills_internet" in ids
+    assert "exp_groceries" in ids
+    assert "transfer_internal" in ids
+    assert "Rent/Mortgage" in names
+    assert len(cats) >= 15
 
 
 def test_seed_rules(repo):
     rules = repo.get_rules()
     patterns = {r["pattern"] for r in rules}
-    assert any("DOMUSO" in p for p in patterns)
-    assert any("SPECTRUM" in p for p in patterns)
+    assert any("NETFLIX" in p for p in patterns)
 
 
 def test_upsert_transactions(repo, chase_df):

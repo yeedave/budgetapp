@@ -11,6 +11,8 @@ class Account:
     bank: str           # "wells_fargo"
     account_type: str   # "checking" | "savings" | "credit"
     owner: str          # "dave" | "cam" | "joint"
+    color: Optional[str] = None       # hex color, e.g. "#6366F1"
+    sort_order: Optional[int] = None  # display order in sidebar
 
 
 @dataclass
@@ -23,6 +25,7 @@ class Transaction:
     user: str           # "dave" | "cam" | "joint"
     raw_description: str
     category_id: Optional[str] = None
+    is_manual: int = 0  # 1 if manually entered by user
 
 
 @dataclass

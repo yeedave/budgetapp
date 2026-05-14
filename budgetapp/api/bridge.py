@@ -1,22 +1,21 @@
+import json
 import os
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
-from budgetapp.config.settings import DB_PATH
+from budgetapp.config.settings import BACKUP_DIR, DB_PATH, SETTINGS_FILE
 from budgetapp.core.categorizer import categorize
-from budgetapp.parsers.apple_card import AppleCardParser
-from budgetapp.parsers.chase_checking import ChaseCheckingParser
-from budgetapp.parsers.marcus_hysa import MarcusHYSAParser
-from budgetapp.parsers.wells_fargo_cc import WellsFargoCCParser
+from budgetapp.parsers.apple import AppleParser
+from budgetapp.parsers.chase import ChaseParser
+from budgetapp.parsers.marcus import MarcusParser
+from budgetapp.parsers.wells_fargo import WellsFargoParser
 from budgetapp.storage.repository import Repository
 
-_PARSERS = {
-    "apple_card": AppleCardParser,
-    "chase_checking": ChaseCheckingParser,
-    "marcus_hysa": MarcusHYSAParser,
-    "wells_fargo_cc": WellsFargoCCParser,
-}
+# Tried in order during auto-detect import. Each parser raises ValueError if the
+# PDF doesn't match its bank, so the first successful parse wins.
+_AUTO_PARSERS = [ChaseParser, WellsFargoParser, AppleParser, MarcusParser]
 
 
 def _tx_dict(row) -> dict:
@@ -27,6 +26,7 @@ def _tx_dict(row) -> dict:
         "amount": str(row["amount"]),
         "account_id": row["account_id"],
         "category_id": row["category_id"],
+        "is_manual": bool(getattr(row, "is_manual", 0) or 0),
     }
 
 
@@ -36,6 +36,8 @@ class Api:
     def __init__(self) -> None:
         self._repo = Repository(DB_PATH)
         self._window = None  # injected after webview.create_window
+        self._pending_df: "pd.DataFrame | None" = None
+        self._pending_path: str = ""
 
     def set_window(self, window) -> None:
         self._window = window
@@ -54,7 +56,8 @@ class Api:
     def get_accounts(self) -> list[dict]:
         accounts = self._repo.get_accounts()
         return [{"id": a.id, "name": a.name, "bank": a.bank,
-                 "account_type": a.account_type, "owner": a.owner}
+                 "account_type": a.account_type, "owner": a.owner,
+                 "color": a.color, "sort_order": a.sort_order}
                 for a in accounts]
 
     def get_categories(self) -> list[dict]:
@@ -71,31 +74,66 @@ class Api:
         )
         return [_tx_dict({"id": t.id, "date": t.date, "description": t.description,
                           "amount": t.amount, "account_id": t.account_id,
-                          "category_id": t.category_id})
+                          "category_id": t.category_id, "is_manual": t.is_manual})
                 for t in txs]
+
+    def add_transaction(self, date: str, description: str, amount: str,
+                        account_id: str, category_id: str = "") -> dict:
+        tx = self._repo.add_manual_transaction(
+            date, description, amount, account_id, category_id or None
+        )
+        return _tx_dict({"id": tx.id, "date": tx.date, "description": tx.description,
+                         "amount": tx.amount, "account_id": tx.account_id,
+                         "category_id": tx.category_id, "is_manual": tx.is_manual})
+
+    def delete_transaction(self, tx_id: str) -> dict:
+        try:
+            self._repo.delete_transaction(tx_id)
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def count_transactions_range(self, start_date: str, end_date: str,
+                                 account_id: str = "") -> int:
+        return self._repo.count_transactions_range(start_date, end_date, account_id or None)
+
+    def delete_transactions_range(self, start_date: str, end_date: str,
+                                  account_id: str = "") -> dict:
+        try:
+            deleted = self._repo.delete_transactions_range(start_date, end_date, account_id or None)
+            return {"ok": True, "deleted": deleted}
+        except Exception as exc:
+            return {"ok": False, "deleted": 0, "error": str(exc)}
 
     # ------------------------------------------------------------------
     # Write
     # ------------------------------------------------------------------
 
-    def set_category(self, tx_id: str, category_id: str) -> None:
-        self._repo.set_category(tx_id, category_id)
+    def set_category(self, tx_id: str, category_id: str) -> dict:
+        updated_ids = self._repo.set_category(tx_id, category_id)
+        return {"updated_ids": updated_ids}
 
     def get_importable_accounts(self) -> list[dict]:
-        """Accounts that have a registered parser."""
-        accounts = self._repo.get_accounts()
-        return [{"id": a.id, "name": a.name}
-                for a in accounts if a.id in _PARSERS]
+        """Kept for API compatibility — always returns an empty list.
+        Use import_any_statement() instead."""
+        return []
 
     def add_account(self, name: str, bank: str, account_type: str, owner: str) -> dict:
         import re
         slug = re.sub(r'[^a-z0-9]+', '_', name.lower()).strip('_')[:40]
         self._repo.upsert_account(slug, name, bank, account_type, owner)
         return {"id": slug, "name": name, "bank": bank,
-                "account_type": account_type, "owner": owner}
+                "account_type": account_type, "owner": owner, "color": None, "sort_order": None}
 
-    def update_account(self, id: str, name: str, bank: str, account_type: str, owner: str) -> None:
-        self._repo.upsert_account(id, name, bank, account_type, owner)
+    def update_account(self, id: str, name: str, bank: str, account_type: str, owner: str,
+                       color: str = "") -> None:
+        self._repo.upsert_account(id, name, bank, account_type, owner, color or None)
+
+    def save_account_color(self, account_id: str, color: str) -> None:
+        self._repo.save_account_color(account_id, color or None)
+
+    def save_account_order(self, ids: list) -> None:
+        self._repo.save_account_order([str(i) for i in ids])
 
     def delete_account(self, account_id: str) -> dict:
         try:
@@ -137,6 +175,8 @@ class Api:
             name=tracker["name"],
             balance=tracker.get("balance") or "0",
             category_id=tracker.get("category_id") or None,
+            goal_amount=tracker.get("goal_amount") or None,
+            monthly_contribution=tracker.get("monthly_contribution") or None,
         )
 
     def delete_savings_tracker(self, tracker_id: str) -> None:
@@ -145,13 +185,13 @@ class Api:
     def get_debts(self) -> list[dict]:
         return self._repo.get_debts()
 
-    def save_debt(self, debt: dict) -> None:
+    def save_debt(self, debt: dict) -> dict:
         mr = debt.get("months_remaining")
         try:
             months_remaining = int(mr) if mr not in (None, "", "null") else None
         except (ValueError, TypeError):
             months_remaining = None
-        self._repo.upsert_debt(
+        return self._repo.upsert_debt(
             id=debt["id"],
             name=debt["name"],
             balance=debt.get("balance") or None,
@@ -209,12 +249,13 @@ class Api:
                 "starting_balance": starting_balance, "skipped": skipped,
                 "baseline_months": baseline_months}
 
-    def import_statement(self, account_id: str) -> dict:
-        import webview
+    def import_statement(self, account_id: str = "") -> dict:
+        """Legacy shim — delegates to import_any_statement()."""
+        return self.import_any_statement()
 
-        parser_cls = _PARSERS.get(account_id)
-        if parser_cls is None:
-            return {"inserted": 0, "error": f"No parser implemented for: {account_id}"}
+    def import_any_statement(self) -> dict:
+        """Open a file picker, auto-detect the bank, and import transactions."""
+        import webview
 
         if self._window is None:
             return {"inserted": 0, "error": "Window not initialised"}
@@ -227,26 +268,473 @@ class Api:
         if not paths:
             return {"inserted": 0, "cancelled": True}
 
+        pdf_path = Path(paths[0])
+
+        # Try each parser — first one that doesn't raise wins
+        df = None
+        last_error = "Could not detect bank or statement format. Is this a supported PDF statement?"
+        for parser_cls in _AUTO_PARSERS:
+            try:
+                candidate = parser_cls().parse(pdf_path)
+                if len(candidate) > 0:
+                    df = candidate
+                    break
+            except Exception as exc:
+                last_error = str(exc)
+
+        if df is None:
+            return {"inserted": 0, "error": last_error}
+
         try:
-            df = parser_cls().parse(Path(paths[0]))
             df = categorize(df, self._repo,
                             use_ai=bool(os.environ.get("ANTHROPIC_API_KEY")))
             inserted = self._repo.upsert_transactions(df)
 
-            # If the parser detected an ending balance, update the savings tracker
-            # whose id starts with tracker_<bank> (e.g. tracker_marcus for marcus_hysa).
-            ending_balance = df.attrs.get('ending_balance')
+            # Auto-update savings tracker if the parser emitted an ending balance
+            ending_balance = df.attrs.get("ending_balance")
             if ending_balance:
-                bank = account_id.split('_')[0]          # "marcus" from "marcus_hysa"
-                tracker_id = f'tracker_{bank}'           # "tracker_marcus"
+                account_id = df["account_id"].iloc[0]
+                bank = account_id.split("_")[0]          # "marcus" from "marcus_hysa"
+                suffix = account_id.split("_")[-1]       # "hysa" from "marcus_hysa"
                 trackers = self._repo.get_savings_trackers()
-                linked = next((t for t in trackers if t['id'] == tracker_id), None)
+                # Match by id convention first, then by bank/suffix in id or name
+                linked = next(
+                    (t for t in trackers if t["id"] == f"tracker_{bank}"), None
+                ) or next(
+                    (t for t in trackers if
+                     bank in t["id"].lower() or suffix in t["id"].lower()
+                     or bank in t["name"].lower() or suffix in t["name"].lower()),
+                    None
+                )
                 if linked:
                     self._repo.upsert_savings_tracker(
-                        linked['id'], linked['name'], ending_balance,
-                        linked.get('category_id'),
+                        linked["id"], linked["name"], ending_balance,
+                        linked.get("category_id"),
                     )
 
+            self._repo.log_import(
+                account_id=df["account_id"].iloc[0],
+                filename=pdf_path.name,
+                inserted=inserted,
+            )
             return {"inserted": inserted}
         except Exception as exc:
             return {"inserted": 0, "error": str(exc)}
+
+    def preview_statement(self) -> dict:
+        """Open file picker, parse PDF, store pending df — does NOT save to DB.
+        Returns detected account info and transaction count for user confirmation."""
+        import webview
+
+        if self._window is None:
+            return {"error": "Window not initialised"}
+
+        paths = self._window.create_file_dialog(
+            webview.OPEN_DIALOG,
+            allow_multiple=False,
+            file_types=("PDF files (*.pdf)",),
+        )
+        if not paths:
+            return {"cancelled": True}
+
+        pdf_path = Path(paths[0])
+        df = None
+        last_error = "Could not detect bank or statement format. Is this a supported PDF statement?"
+        for parser_cls in _AUTO_PARSERS:
+            try:
+                candidate = parser_cls().parse(pdf_path)
+                if len(candidate) > 0:
+                    df = candidate
+                    break
+            except Exception as exc:
+                last_error = str(exc)
+
+        if df is None:
+            return {"error": last_error}
+
+        self._pending_df = df
+        self._pending_path = pdf_path.name
+        detected_id = df["account_id"].iloc[0]
+
+        # Look up display name from accounts table
+        accounts = self._repo.get_accounts()
+        detected_name = next((a.name for a in accounts if a.id == detected_id), detected_id)
+
+        return {
+            "detected_account_id": detected_id,
+            "detected_account_name": detected_name,
+            "count": len(df),
+        }
+
+    def confirm_import(self, force_account_id: str = "") -> dict:
+        """Save the previously previewed statement. Optionally override the account."""
+        if self._pending_df is None:
+            return {"inserted": 0, "error": "No pending import — call preview_statement first"}
+
+        df = self._pending_df
+        pdf_name = self._pending_path
+        self._pending_df = None
+        self._pending_path = ""
+
+        if force_account_id:
+            df = df.copy()
+            df["account_id"] = force_account_id
+
+        try:
+            df = categorize(df, self._repo,
+                            use_ai=bool(os.environ.get("ANTHROPIC_API_KEY")))
+            inserted = self._repo.upsert_transactions(df)
+
+            # Auto-update savings tracker if the parser emitted an ending balance
+            ending_balance = df.attrs.get("ending_balance")
+            if ending_balance:
+                account_id = df["account_id"].iloc[0]
+                bank = account_id.split("_")[0]
+                suffix = account_id.split("_")[-1]
+                trackers = self._repo.get_savings_trackers()
+                linked = next(
+                    (t for t in trackers if t["id"] == f"tracker_{bank}"), None
+                ) or next(
+                    (t for t in trackers if
+                     bank in t["id"].lower() or suffix in t["id"].lower()
+                     or bank in t["name"].lower() or suffix in t["name"].lower()),
+                    None
+                )
+                if linked:
+                    self._repo.upsert_savings_tracker(
+                        linked["id"], linked["name"], ending_balance,
+                        linked.get("category_id"),
+                    )
+
+            self._repo.log_import(
+                account_id=df["account_id"].iloc[0],
+                filename=pdf_name,
+                inserted=inserted,
+            )
+            return {"inserted": inserted}
+        except Exception as exc:
+            return {"inserted": 0, "error": str(exc)}
+
+    def export_backup(self) -> dict:
+        import webview
+
+        data = self._repo.export_all()
+        data["exported_at"] = datetime.now().isoformat()
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        fname = f"budgetapp_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+
+        if self._window:
+            paths = self._window.create_file_dialog(
+                webview.SAVE_DIALOG,
+                save_filename=fname,
+                file_types=("JSON files (*.json)",),
+            )
+            if not paths:
+                return {"ok": False, "cancelled": True}
+            out_path = Path(paths if isinstance(paths, str) else paths[0])
+        else:
+            out_path = BACKUP_DIR / fname
+
+        out_path.write_text(json.dumps(data, indent=2, default=str))
+        self._save_settings({"last_backup": datetime.now().isoformat()})
+        return {"ok": True, "path": str(out_path)}
+
+    def import_backup(self) -> dict:
+        import webview
+
+        if self._window is None:
+            return {"ok": False, "error": "Window not initialised"}
+
+        paths = self._window.create_file_dialog(
+            webview.OPEN_DIALOG,
+            allow_multiple=False,
+            file_types=("JSON files (*.json)",),
+        )
+        if not paths:
+            return {"ok": False, "cancelled": True}
+
+        try:
+            data = json.loads(Path(paths[0]).read_text())
+            counts = self._repo.import_all(data)
+            return {"ok": True, "counts": counts}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Affordability calculator
+    # ------------------------------------------------------------------
+
+    def get_budget_snapshot(self, months: str = "3") -> dict:
+        """Return avg monthly income/spending by bucket over the last N complete months."""
+        from decimal import Decimal
+        from datetime import date, timedelta
+
+        n = max(1, min(12, int(months or "3")))
+        today = date.today()
+
+        # Last N complete calendar months (exclude current in-progress month)
+        first_of_current = today.replace(day=1)
+        end_date = first_of_current - timedelta(days=1)
+        start_date = end_date.replace(day=1)
+        for _ in range(n - 1):
+            start_date = (start_date - timedelta(days=1)).replace(day=1)
+
+        conn = self._repo.conn
+
+        # Bucket-level totals
+        bucket_rows = conn.execute(
+            """SELECT c.bucket, SUM(CAST(t.amount AS REAL)) AS total
+               FROM transactions t
+               JOIN categories c ON t.category_id = c.id
+               WHERE t.date >= ? AND t.date <= ? AND c.bucket != 'transfers'
+               GROUP BY c.bucket""",
+            (start_date.isoformat(), end_date.isoformat()),
+        ).fetchall()
+
+        by_bucket = {r["bucket"]: Decimal(str(r["total"])) for r in bucket_rows}
+
+        inc  = by_bucket.get("income", Decimal("0")) / n
+        bill = abs(by_bucket.get("bills", Decimal("0"))) / n
+        sub  = abs(by_bucket.get("subscriptions", Decimal("0"))) / n
+        exp  = abs(by_bucket.get("expenses", Decimal("0"))) / n
+        dbt  = abs(by_bucket.get("debts", Decimal("0"))) / n
+        sav  = abs(by_bucket.get("savings", Decimal("0"))) / n
+        surplus = inc - bill - sub - exp - dbt - sav
+
+        # Category-level breakdown
+        cat_rows = conn.execute(
+            """SELECT t.category_id, c.name, c.bucket, c.budget_amount,
+                      SUM(CAST(t.amount AS REAL)) AS total
+               FROM transactions t
+               JOIN categories c ON t.category_id = c.id
+               WHERE t.date >= ? AND t.date <= ? AND c.bucket != 'transfers'
+               GROUP BY t.category_id
+               ORDER BY c.bucket, ABS(SUM(CAST(t.amount AS REAL))) DESC""",
+            (start_date.isoformat(), end_date.isoformat()),
+        ).fetchall()
+
+        categories = [
+            {
+                "id": r["category_id"],
+                "name": r["name"],
+                "bucket": r["bucket"],
+                "monthly_avg": float(Decimal(str(r["total"])) / n),
+                "budget": float(Decimal(r["budget_amount"])) if r["budget_amount"] else None,
+            }
+            for r in cat_rows
+        ]
+
+        trackers = self._repo.get_savings_trackers()
+        total_savings = float(sum(Decimal(t["balance"] or "0") for t in trackers))
+
+        return {
+            "monthly_income": float(inc),
+            "monthly_bills": float(bill),
+            "monthly_subscriptions": float(sub),
+            "monthly_variable": float(exp),
+            "monthly_debt_payments": float(dbt),
+            "monthly_savings_contributions": float(sav),
+            "monthly_surplus": float(surplus),
+            "total_savings": total_savings,
+            "months_analyzed": n,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "categories": categories,
+        }
+
+    def get_import_log(self, account_id: str = "") -> list[dict]:
+        return self._repo.get_import_log(account_id or None)
+
+    # ------------------------------------------------------------------
+    # Categorization rules
+    # ------------------------------------------------------------------
+
+    def get_rules(self) -> list[dict]:
+        return self._repo.get_rules()
+
+    def save_rule(self, pattern: str, category_id: str) -> dict:
+        return self._repo.create_rule(pattern, category_id)
+
+    def delete_rule(self, rule_id: int) -> None:
+        self._repo.delete_rule(rule_id)
+
+    def get_settings(self) -> dict:
+        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        if SETTINGS_FILE.exists():
+            return json.loads(SETTINGS_FILE.read_text())
+        return {}
+
+    def _save_settings(self, updates: dict) -> None:
+        current = self.get_settings()
+        current.update(updates)
+        SETTINGS_FILE.write_text(json.dumps(current, indent=2))
+
+    # ------------------------------------------------------------------
+    # Progress / XP
+    # ------------------------------------------------------------------
+
+    _LEVELS = [
+        (0,     "Getting Started"),
+        (500,   "Building Momentum"),
+        (1500,  "Committed"),
+        (3000,  "Determined"),
+        (5000,  "Unstoppable"),
+        (8000,  "Warrior"),
+        (12000, "Champion"),
+        (20000, "Debt Slayer"),
+    ]
+
+    def get_progress(self) -> dict:
+        from decimal import Decimal as _D
+        xp_total = float(self._repo.get_xp_total())
+        events = self._repo.get_xp_events(20)
+
+        # Compute current level
+        level_idx = 0
+        for i, (threshold, _) in enumerate(self._LEVELS):
+            if xp_total >= threshold:
+                level_idx = i
+
+        current_level = level_idx + 1
+        current_name = self._LEVELS[level_idx][1]
+        current_min = self._LEVELS[level_idx][0]
+        if level_idx + 1 < len(self._LEVELS):
+            next_min = self._LEVELS[level_idx + 1][0]
+            next_name = self._LEVELS[level_idx + 1][1]
+            xp_in_level = xp_total - current_min
+            xp_needed = next_min - current_min
+            pct = min(100.0, (xp_in_level / xp_needed) * 100) if xp_needed > 0 else 100.0
+        else:
+            next_min = None
+            next_name = None
+            xp_in_level = xp_total - current_min
+            xp_needed = 0
+            pct = 100.0
+
+        settings = self.get_settings()
+        return {
+            "xp_total": xp_total,
+            "level": current_level,
+            "level_name": current_name,
+            "level_pct": round(pct, 1),
+            "xp_in_level": round(xp_in_level, 2),
+            "xp_needed": xp_needed,
+            "next_level_name": next_name,
+            "prize_fund_balance": settings.get("prize_fund_balance", "0"),
+            "prize_fund_pct": settings.get("prize_fund_pct", "10"),
+            "levels": [{"level": i + 1, "name": n, "min_xp": t, "unlocked": xp_total >= t}
+                       for i, (t, n) in enumerate(self._LEVELS)],
+            "recent_events": events,
+        }
+
+    def set_prize_fund_pct(self, pct: str) -> None:
+        self._save_settings({"prize_fund_pct": pct})
+
+    # ------------------------------------------------------------------
+    # Net worth / Assets
+    # ------------------------------------------------------------------
+
+    def get_net_worth(self) -> dict:
+        return self._repo.get_net_worth()
+
+    def save_asset(self, asset: dict) -> None:
+        import re
+        a_id = asset.get("id") or re.sub(r'[^a-z0-9]+', '_', asset["name"].lower()).strip('_')[:40]
+        self._repo.upsert_asset(a_id, asset["name"], asset.get("value", "0"), asset.get("asset_type", "other"))
+
+    def delete_asset(self, asset_id: str) -> None:
+        self._repo.delete_asset(asset_id)
+
+    # ------------------------------------------------------------------
+    # Monthly trends
+    # ------------------------------------------------------------------
+
+    def get_monthly_trends(self, months: str = "12") -> dict:
+        n = max(1, min(24, int(months or "12")))
+        return self._repo.get_monthly_trends(n)
+
+    # ------------------------------------------------------------------
+    # Recurring detection
+    # ------------------------------------------------------------------
+
+    def detect_recurring(self) -> list[dict]:
+        return self._repo.detect_recurring()
+
+    # ------------------------------------------------------------------
+    # Upcoming bills
+    # ------------------------------------------------------------------
+
+    def get_upcoming_bills(self) -> list[dict]:
+        from datetime import date, timedelta
+        today = date.today()
+        debts = self._repo.get_debts()
+        upcoming = []
+        for d in debts:
+            due_day = d.get("due_day")
+            if not due_day:
+                continue
+            # Next occurrence of due_day in this or next month
+            try:
+                next_due = today.replace(day=int(due_day))
+            except ValueError:
+                # due_day > days in this month — use last day
+                import calendar
+                last = calendar.monthrange(today.year, today.month)[1]
+                next_due = today.replace(day=last)
+            if next_due < today:
+                # Move to next month
+                if today.month == 12:
+                    next_due = next_due.replace(year=today.year + 1, month=1)
+                else:
+                    try:
+                        next_due = next_due.replace(month=today.month + 1)
+                    except ValueError:
+                        import calendar
+                        last = calendar.monthrange(today.year, today.month + 1)[1]
+                        next_due = next_due.replace(month=today.month + 1, day=last)
+            days_until = (next_due - today).days
+            if days_until <= 14:
+                upcoming.append({
+                    "id": d["id"],
+                    "name": d["name"],
+                    "minimum": d.get("minimum"),
+                    "due_date": next_due.isoformat(),
+                    "days_until": days_until,
+                })
+        upcoming.sort(key=lambda x: x["days_until"])
+        return upcoming
+
+    # ------------------------------------------------------------------
+    # Splits
+    # ------------------------------------------------------------------
+
+    def get_splits(self, status: str = "pending") -> list[dict]:
+        rows = self._repo.get_splits(status)
+        # Ensure date field is a string (it comes from a JOIN as a date string already)
+        for r in rows:
+            if "date" in r and r["date"] and hasattr(r["date"], "isoformat"):
+                r["date"] = r["date"].isoformat()
+        return rows
+
+    def create_split(self, tx_id: str, description: str, owed_by: str, amount_owed: str) -> dict:
+        row = self._repo.create_split(tx_id, description, owed_by, amount_owed)
+        if "date" in row and row["date"] and hasattr(row["date"], "isoformat"):
+            row["date"] = row["date"].isoformat()
+        return row
+
+    def settle_split(self, split_id: str) -> None:
+        self._repo.settle_split(split_id)
+
+    def delete_split(self, split_id: str) -> None:
+        self._repo.delete_split(split_id)
+
+    # ------------------------------------------------------------------
+    # Debt due day
+    # ------------------------------------------------------------------
+
+    def save_debt_due_day(self, debt_id: str, due_day) -> None:
+        try:
+            day = int(due_day) if due_day not in (None, "", "null") else None
+        except (ValueError, TypeError):
+            day = None
+        self._repo.save_debt_due_day(debt_id, day)

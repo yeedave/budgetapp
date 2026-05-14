@@ -53,12 +53,23 @@ def test_rule_first_match_wins():
 # ------------------------------------------------------------------
 
 def test_categorize_known_rules(repo, chase_df):
+    # Insert test-specific rules (not in generic seed)
+    repo.conn.execute(
+        "INSERT OR IGNORE INTO categorization_rules (pattern, category_id, priority) VALUES (?,?,?)",
+        ("DOMUSO", "bills_rent", 10),
+    )
+    repo.conn.commit()
     result = categorize(chase_df, repo, use_ai=False)
     domuso = result[result["description"].str.contains("Domuso", case=False)].iloc[0]
     assert domuso["category_id"] == "bills_rent"
 
 
 def test_categorize_spectrum(repo, chase_df):
+    repo.conn.execute(
+        "INSERT OR IGNORE INTO categorization_rules (pattern, category_id, priority) VALUES (?,?,?)",
+        ("SPECTRUM", "bills_internet", 10),
+    )
+    repo.conn.commit()
     result = categorize(chase_df, repo, use_ai=False)
     spectrum = result[result["description"].str.contains("Spectrum", case=False)].iloc[0]
     assert spectrum["category_id"] == "bills_internet"

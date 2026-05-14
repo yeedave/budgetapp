@@ -43,13 +43,17 @@ export default function Sidebar({
           <button
             key={a.id}
             onClick={() => onAccountChange(a.id)}
-            className={`w-full text-left px-3 py-2 rounded text-sm mb-0.5 ${
+            className={`w-full text-left px-3 py-2 rounded text-sm mb-0.5 flex items-center gap-2 ${
               selectedAccount === a.id
                 ? 'bg-indigo-50 text-indigo-700 font-medium'
                 : 'text-gray-700 hover:bg-gray-50'
             }`}
           >
-            {a.name}
+            <span
+              className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
+              style={{ background: a.color ?? '#D1D5DB' }}
+            />
+            <span className="truncate">{a.name}</span>
           </button>
         ))}
       </nav>
