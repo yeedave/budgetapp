@@ -26,7 +26,7 @@ class ChaseParser(AbstractParser):
       3. Falls back to checking parser (raises its own error on failure)
     """
 
-    account_id = "chase_checking"  # overridden by whichever sub-parser wins
+    format_name = "Chase"  # refined by whichever sub-parser wins
 
     def parse(self, pdf_path: Path) -> pd.DataFrame:
         text = _peek_text(pdf_path)

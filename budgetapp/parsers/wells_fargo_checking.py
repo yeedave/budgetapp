@@ -23,7 +23,7 @@ _PERIOD_END_RE = re.compile(r'(?:through|to|-)\s+(\d{1,2})/\d{1,2}/(\d{4})', re.
 
 
 class WellsFargoCheckingParser(AbstractParser):
-    account_id = "wells_fargo_checking"
+    format_name = "Wells Fargo Checking"
 
     def parse(self, pdf_path: Path) -> pd.DataFrame:
         records = []
@@ -112,7 +112,6 @@ class WellsFargoCheckingParser(AbstractParser):
                         'description': desc,
                         'raw_description': desc,
                         'amount': amount,
-                        'account_id': self.account_id,
                     })
 
         if not records:

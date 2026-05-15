@@ -20,8 +20,8 @@ def test_columns(df):
     assert list(df.columns) == TRANSACTION_COLUMNS
 
 
-def test_account_id(df):
-    assert (df["account_id"] == "wells_fargo_cc").all()
+def test_format_name(df):
+    assert WellsFargoCCParser().format_name == "Wells Fargo Credit Card"
 
 
 def test_date_range(df):

@@ -29,7 +29,7 @@ _DEBIT_SECTION = re.compile(r"^(?:Cash Advances|Purchases,|Fees Charged|Interest
 
 
 class WellsFargoCCParser(AbstractParser):
-    account_id = "wells_fargo_cc"
+    format_name = "Wells Fargo Credit Card"
 
     def parse(self, pdf_path: Path) -> pd.DataFrame:
         lines: list[str] = []
@@ -79,7 +79,6 @@ class WellsFargoCCParser(AbstractParser):
                 "description": desc.strip(),
                 "raw_description": desc.strip(),
                 "amount": amount,
-                "account_id": self.account_id,
             })
 
         return rows

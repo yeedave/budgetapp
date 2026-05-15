@@ -16,7 +16,7 @@ def _peek_text(pdf_path: Path, pages: int = 2) -> str:
 
 
 class AppleParser(AbstractParser):
-    account_id = "apple_card"
+    format_name = "Apple Card"
 
     def parse(self, pdf_path: Path):
         text = _peek_text(pdf_path)

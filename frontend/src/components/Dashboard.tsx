@@ -136,7 +136,15 @@ export default function Dashboard({ transactions, categories }: Props) {
                 ))}
               </Pie>
               <Tooltip formatter={(v) => fmt.format(v as number)} />
-              <Legend iconType="circle" iconSize={10} />
+              <Legend
+                iconType="circle"
+                iconSize={10}
+                formatter={(value, entry) => {
+                  const total = pieData.reduce((s, d) => s + d.value, 0)
+                  const pct = total > 0 ? Math.round(((entry as { payload?: { value?: number } }).payload?.value ?? 0) / total * 100) : 0
+                  return `${value} (${pct}%)`
+                }}
+              />
             </PieChart>
           </ResponsiveContainer>
         </div>

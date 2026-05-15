@@ -2,6 +2,8 @@
 
 Native desktop budget tracker for a household. Imports bank statement PDFs, auto-categorizes transactions with rule learning and optional Claude AI fallback, and renders an interactive dashboard replacing a spreadsheet.
 
+Fully generic — no hardcoded account IDs. Create your own accounts, then select which account each statement belongs to at import time.
+
 ## Stack
 
 - **Backend** — Python 3.12 · pdfplumber · pandas · SQLite · pywebview
@@ -68,4 +70,5 @@ pytest
 - Data lives in `data/budgetapp.db` (gitignored — never committed)
 - Re-importing the same PDF is safe — transaction IDs are deterministic hashes
 - Amount sign convention: negative = expense, positive = income/credit
+- Parsers auto-detect the bank format; you pick which account to import into
 - Restart the app (not just refresh) after frontend changes when using pywebview

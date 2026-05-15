@@ -19,7 +19,7 @@ def _peek_text(pdf_path: Path, pages: int = 3) -> str:
 class WellsFargoParser(AbstractParser):
     """Accepts any Wells Fargo PDF and routes to CC or Checking sub-parser."""
 
-    account_id = "wells_fargo_cc"  # overridden per sub-parser
+    format_name = "Wells Fargo"  # refined by sub-parser
 
     def parse(self, pdf_path: Path):
         text = _peek_text(pdf_path)

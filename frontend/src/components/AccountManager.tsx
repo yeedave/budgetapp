@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import type { Account, ImportLogEntry } from '../types'
-import { addAccount, updateAccount, deleteAccount, saveAccountColor, saveAccountOrder, getImportLog } from '../api'
+import { addAccount, updateAccount, deleteAccount, saveAccountColor, saveAccountOrder, getImportLog, getOrphanedAccountIds, deleteTransactionsForAccount } from '../api'
 import HelpTooltip from './HelpTooltip'
 
 const ACCOUNT_TYPES = ['checking', 'savings', 'credit']
@@ -98,12 +98,24 @@ export default function AccountManager({ accounts, onAccountsChange }: Props) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [importLog, setImportLog] = useState<ImportLogEntry[]>([])
+  const [orphaned, setOrphaned] = useState<{ account_id: string; tx_count: number }[]>([])
+  const [deletingOrphan, setDeletingOrphan] = useState<string | null>(null)
 
   // Drag-and-drop state
   const dragIndex = useRef<number | null>(null)
   const [dragOver, setDragOver] = useState<number | null>(null)
 
-  useEffect(() => { getImportLog().then(setImportLog) }, [])
+  useEffect(() => {
+    getImportLog().then(setImportLog)
+    getOrphanedAccountIds().then(setOrphaned)
+  }, [])
+
+  async function handleDeleteOrphan(accountId: string) {
+    setDeletingOrphan(accountId)
+    await deleteTransactionsForAccount(accountId)
+    setOrphaned((prev) => prev.filter((o) => o.account_id !== accountId))
+    setDeletingOrphan(null)
+  }
 
   const handleEdit = (acct: Account) => {
     setEditingId(acct.id)
@@ -369,6 +381,36 @@ export default function AccountManager({ accounts, onAccountsChange }: Props) {
           </tbody>
         </table>
       </div>
+
+      {/* ── Orphaned account cleanup ─────────────────────────────────── */}
+      {orphaned.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-5 py-4">
+          <div className="flex items-center gap-2 text-sm font-semibold text-amber-700 mb-2">
+            Orphaned Transactions
+            <HelpTooltip text="These account IDs appear in your transactions but no longer have a matching account. This happens when statements were imported before the account was renamed or deleted." />
+          </div>
+          <p className="text-xs text-amber-600 mb-3">
+            Delete these to remove the duplicates — your correctly-tagged transactions are unaffected.
+          </p>
+          <div className="space-y-2">
+            {orphaned.map((o) => (
+              <div key={o.account_id} className="flex items-center justify-between bg-white rounded border border-amber-100 px-3 py-2">
+                <div>
+                  <span className="text-sm font-mono text-gray-700">{o.account_id}</span>
+                  <span className="ml-2 text-xs text-gray-400">{o.tx_count} transaction{o.tx_count !== 1 ? 's' : ''}</span>
+                </div>
+                <button
+                  onClick={() => handleDeleteOrphan(o.account_id)}
+                  disabled={deletingOrphan === o.account_id}
+                  className="text-xs px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-40 transition-colors"
+                >
+                  {deletingOrphan === o.account_id ? 'Deleting…' : `Delete ${o.tx_count}`}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Import History ──────────────────────────────────────────── */}
       <div className="bg-white rounded-lg border">

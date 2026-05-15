@@ -26,7 +26,7 @@ def _has_marcus_columns(pdf_path: Path, pages: int = 4) -> bool:
 
 
 class MarcusParser(AbstractParser):
-    account_id = "marcus_hysa"
+    format_name = "Marcus HYSA"
 
     def parse(self, pdf_path: Path):
         text = _peek_text(pdf_path)

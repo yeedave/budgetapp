@@ -142,6 +142,13 @@ class Api:
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
 
+    def get_orphaned_account_ids(self) -> list:
+        return self._repo.get_orphaned_account_ids()
+
+    def delete_transactions_for_account(self, account_id: str) -> dict:
+        deleted = self._repo.delete_transactions_for_account(account_id)
+        return {"ok": True, "deleted": deleted}
+
     def set_category_budget(self, category_id: str, budget_amount: str) -> None:
         self._repo.set_category_budget(category_id, budget_amount or None)
 
@@ -254,72 +261,8 @@ class Api:
         return self.import_any_statement()
 
     def import_any_statement(self) -> dict:
-        """Open a file picker, auto-detect the bank, and import transactions."""
-        import webview
-
-        if self._window is None:
-            return {"inserted": 0, "error": "Window not initialised"}
-
-        paths = self._window.create_file_dialog(
-            webview.OPEN_DIALOG,
-            allow_multiple=False,
-            file_types=("PDF files (*.pdf)",),
-        )
-        if not paths:
-            return {"inserted": 0, "cancelled": True}
-
-        pdf_path = Path(paths[0])
-
-        # Try each parser — first one that doesn't raise wins
-        df = None
-        last_error = "Could not detect bank or statement format. Is this a supported PDF statement?"
-        for parser_cls in _AUTO_PARSERS:
-            try:
-                candidate = parser_cls().parse(pdf_path)
-                if len(candidate) > 0:
-                    df = candidate
-                    break
-            except Exception as exc:
-                last_error = str(exc)
-
-        if df is None:
-            return {"inserted": 0, "error": last_error}
-
-        try:
-            df = categorize(df, self._repo,
-                            use_ai=bool(os.environ.get("ANTHROPIC_API_KEY")))
-            inserted = self._repo.upsert_transactions(df)
-
-            # Auto-update savings tracker if the parser emitted an ending balance
-            ending_balance = df.attrs.get("ending_balance")
-            if ending_balance:
-                account_id = df["account_id"].iloc[0]
-                bank = account_id.split("_")[0]          # "marcus" from "marcus_hysa"
-                suffix = account_id.split("_")[-1]       # "hysa" from "marcus_hysa"
-                trackers = self._repo.get_savings_trackers()
-                # Match by id convention first, then by bank/suffix in id or name
-                linked = next(
-                    (t for t in trackers if t["id"] == f"tracker_{bank}"), None
-                ) or next(
-                    (t for t in trackers if
-                     bank in t["id"].lower() or suffix in t["id"].lower()
-                     or bank in t["name"].lower() or suffix in t["name"].lower()),
-                    None
-                )
-                if linked:
-                    self._repo.upsert_savings_tracker(
-                        linked["id"], linked["name"], ending_balance,
-                        linked.get("category_id"),
-                    )
-
-            self._repo.log_import(
-                account_id=df["account_id"].iloc[0],
-                filename=pdf_path.name,
-                inserted=inserted,
-            )
-            return {"inserted": inserted}
-        except Exception as exc:
-            return {"inserted": 0, "error": str(exc)}
+        """Deprecated — account assignment requires user input. Use preview_statement + confirm_import."""
+        return {"inserted": 0, "error": "Use 'Import Statement' to select and assign an account."}
 
     def preview_statement(self) -> dict:
         """Open file picker, parse PDF, store pending df — does NOT save to DB.
@@ -354,31 +297,25 @@ class Api:
 
         self._pending_df = df
         self._pending_path = pdf_path.name
-        detected_id = df["account_id"].iloc[0]
-
-        # Look up display name from accounts table
-        accounts = self._repo.get_accounts()
-        detected_name = next((a.name for a in accounts if a.id == detected_id), detected_id)
 
         return {
-            "detected_account_id": detected_id,
-            "detected_account_name": detected_name,
+            "detected_format": df.attrs.get("format_name", "Unknown format"),
             "count": len(df),
         }
 
     def confirm_import(self, force_account_id: str = "") -> dict:
-        """Save the previously previewed statement. Optionally override the account."""
+        """Save the previously previewed statement under the given account_id."""
         if self._pending_df is None:
             return {"inserted": 0, "error": "No pending import — call preview_statement first"}
+        if not force_account_id:
+            return {"inserted": 0, "error": "An account must be selected before importing"}
 
-        df = self._pending_df
+        df = self._pending_df.copy()
         pdf_name = self._pending_path
         self._pending_df = None
         self._pending_path = ""
 
-        if force_account_id:
-            df = df.copy()
-            df["account_id"] = force_account_id
+        df["account_id"] = force_account_id
 
         try:
             df = categorize(df, self._repo,
@@ -386,18 +323,14 @@ class Api:
             inserted = self._repo.upsert_transactions(df)
 
             # Auto-update savings tracker if the parser emitted an ending balance
+            # (Marcus HYSA statements carry the account's ending balance)
             ending_balance = df.attrs.get("ending_balance")
-            if ending_balance:
-                account_id = df["account_id"].iloc[0]
-                bank = account_id.split("_")[0]
-                suffix = account_id.split("_")[-1]
+            if ending_balance and df.attrs.get("format_name") == "Marcus HYSA":
                 trackers = self._repo.get_savings_trackers()
+                # Match any tracker whose id or name mentions "marcus"
                 linked = next(
-                    (t for t in trackers if t["id"] == f"tracker_{bank}"), None
-                ) or next(
                     (t for t in trackers if
-                     bank in t["id"].lower() or suffix in t["id"].lower()
-                     or bank in t["name"].lower() or suffix in t["name"].lower()),
+                     "marcus" in t["id"].lower() or "marcus" in t["name"].lower()),
                     None
                 )
                 if linked:
@@ -407,7 +340,7 @@ class Api:
                     )
 
             self._repo.log_import(
-                account_id=df["account_id"].iloc[0],
+                account_id=force_account_id,
                 filename=pdf_name,
                 inserted=inserted,
             )
@@ -463,6 +396,9 @@ class Api:
     # ------------------------------------------------------------------
     # Affordability calculator
     # ------------------------------------------------------------------
+
+    def get_budget_guide(self) -> dict:
+        return self._repo.get_budget_guide()
 
     def get_budget_snapshot(self, months: str = "3") -> dict:
         """Return avg monthly income/spending by bucket over the last N complete months."""

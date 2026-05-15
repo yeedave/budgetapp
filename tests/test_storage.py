@@ -15,7 +15,9 @@ def repo(tmp_path):
 
 @pytest.fixture
 def chase_df(chase_checking_pdf):
-    return ChaseCheckingParser().parse(chase_checking_pdf)
+    df = ChaseCheckingParser().parse(chase_checking_pdf)
+    df["account_id"] = "chase_checking"  # bridge stamps this at import time
+    return df
 
 
 def test_seed_accounts(repo):

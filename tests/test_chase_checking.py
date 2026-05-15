@@ -21,8 +21,8 @@ def test_columns(df):
     assert list(df.columns) == TRANSACTION_COLUMNS
 
 
-def test_account_id(df):
-    assert (df["account_id"] == "chase_checking").all()
+def test_format_name(df):
+    assert ChaseCheckingParser().format_name == "Chase Checking"
 
 
 def test_date_range(df):
@@ -60,3 +60,34 @@ def test_no_duplicate_date_in_description(df):
     dup_date = re.compile(r"^\d{2}/\d{2}\s+")
     for desc in df["description"]:
         assert not dup_date.match(desc), f"Duplicate date in: {desc!r}"
+
+
+# --- Direct-deposit account (6772): verifies payroll rows that were fused with
+#     a PDF bookmark marker and previously silently dropped. ---
+
+@pytest.fixture
+def dd_df(chase_dd_pdf):
+    return ChaseCheckingParser().parse(chase_dd_pdf)
+
+
+def test_dd_row_count(dd_df):
+    assert len(dd_df) == 32
+
+
+def test_dd_payroll_intellisense_march(dd_df):
+    rows = dd_df[dd_df["description"].str.contains("Intellisense", case=False)]
+    assert len(rows) == 2
+    amounts = sorted(rows["amount"].tolist())
+    assert amounts[0] == Decimal("1692.66")
+    assert amounts[1] == Decimal("1692.67")
+
+
+def test_dd_payroll_nor_la(dd_df):
+    rows = dd_df[dd_df["description"].str.contains("Nor LA", case=False)]
+    assert len(rows) == 2
+    assert set(rows["amount"].tolist()) == {Decimal("1853.01"), Decimal("2156.73")}
+
+
+def test_dd_total_deposits(dd_df):
+    total = dd_df[dd_df["amount"] > 0]["amount"].sum()
+    assert total == Decimal("12395.07")

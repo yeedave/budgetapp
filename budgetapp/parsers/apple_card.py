@@ -44,7 +44,7 @@ class AppleCardParser(AbstractParser):
       Returns:    PDF -$X.XX in transactions section → negate → positive credit
     """
 
-    account_id = "apple_card"
+    format_name = "Apple Card"
 
     def parse(self, pdf_path: Path) -> pd.DataFrame:
         lines: list[str] = []
@@ -71,7 +71,6 @@ class AppleCardParser(AbstractParser):
                     "description": desc.strip(),
                     "raw_description": desc.strip(),
                     "amount": -_parse_dollar(amount_str),
-                    "account_id": self.account_id,
                 })
                 continue
 
@@ -84,7 +83,6 @@ class AppleCardParser(AbstractParser):
                     "description": desc.strip(),
                     "raw_description": desc.strip(),
                     "amount": -_parse_dollar(amount_str),
-                    "account_id": self.account_id,
                 })
 
         return rows

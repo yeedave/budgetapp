@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { Account, Category, Transaction, ImportResult } from './types'
 import { getAccounts, getCategories, getTransactions, setCategory, addTransaction, deleteTransaction } from './api'
 import Sidebar from './components/Sidebar'
@@ -12,8 +12,9 @@ import SettingsManager from './components/SettingsManager'
 import ProgressTab from './components/ProgressTab'
 import Calculator from './components/Calculator'
 import SplitsManager from './components/SplitsManager'
+import BudgetGuide from './components/BudgetGuide'
 
-type View = 'dashboard' | 'transactions' | 'debts' | 'categories' | 'accounts' | 'calculator' | 'progress' | 'splits' | 'settings'
+type View = 'dashboard' | 'transactions' | 'debts' | 'categories' | 'accounts' | 'calculator' | 'progress' | 'splits' | 'guide' | 'settings'
 
 function usePywebviewReady() {
   const [ready, setReady] = useState(!!window.pywebview?.api)
@@ -26,10 +27,70 @@ function usePywebviewReady() {
   return ready
 }
 
-const VALID_VIEWS: View[] = ['dashboard', 'transactions', 'debts', 'categories', 'accounts', 'calculator', 'progress', 'splits', 'settings']
+const VALID_VIEWS: View[] = ['dashboard', 'transactions', 'debts', 'categories', 'accounts', 'calculator', 'progress', 'splits', 'guide', 'settings']
+
+const PRIMARY_VIEWS: View[] = ['dashboard', 'transactions', 'debts', 'categories', 'accounts', 'progress']
+const MORE_VIEWS: View[] = ['calculator', 'splits', 'guide', 'settings']
+const VIEW_LABEL: Record<View, string> = {
+  dashboard: 'Dashboard', transactions: 'Transactions', debts: 'Debts',
+  categories: 'Categories', accounts: 'Accounts', progress: 'Progress',
+  calculator: 'Calculator', splits: 'Splits', guide: 'Guide', settings: 'Settings',
+}
 
 function persist(key: string, value: string) {
   try { localStorage.setItem(key, value) } catch { /* ignore */ }
+}
+
+function MoreMenu({ views, activeView, labels, onSelect }: {
+  views: View[]
+  activeView: View
+  labels: Record<View, string>
+  onSelect: (v: View) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const hasActive = views.includes(activeView)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={`px-3 py-3 text-sm border-b-2 transition-colors flex items-center gap-1 ${
+          hasActive
+            ? 'border-indigo-600 text-indigo-600 font-medium'
+            : 'border-transparent text-gray-500 hover:text-gray-700'
+        }`}
+      >
+        {hasActive ? labels[activeView] : 'More'} <span className="text-xs">▾</span>
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 w-36 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1">
+          {views.map((v) => (
+            <button
+              key={v}
+              onClick={() => { onSelect(v); setOpen(false) }}
+              className={`w-full text-left px-4 py-2 text-sm transition-colors ${
+                activeView === v
+                  ? 'text-indigo-600 font-medium bg-indigo-50'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              {labels[v]}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function App() {
@@ -111,20 +172,28 @@ export default function App() {
       <header className="shrink-0 bg-white border-b px-5 py-0 flex items-center gap-1 shadow-sm">
         <span className="font-semibold text-gray-900 mr-4 py-3">BudgetApp</span>
 
-        {/* Tabs */}
-        {(['dashboard', 'transactions', 'debts', 'categories', 'accounts', 'calculator', 'progress', 'splits', 'settings'] as View[]).map((v) => (
+        {/* Primary tabs */}
+        {PRIMARY_VIEWS.map((v) => (
           <button
             key={v}
             onClick={() => handleViewChange(v)}
-            className={`px-4 py-3 text-sm border-b-2 transition-colors capitalize ${
+            className={`px-3 py-3 text-sm border-b-2 transition-colors whitespace-nowrap ${
               view === v
                 ? 'border-indigo-600 text-indigo-600 font-medium'
                 : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            {v}
+            {VIEW_LABEL[v]}
           </button>
         ))}
+
+        {/* More ▾ dropdown */}
+        <MoreMenu
+          views={MORE_VIEWS}
+          activeView={view}
+          labels={VIEW_LABEL}
+          onSelect={handleViewChange}
+        />
 
         <div className="flex-1" />
         <ImportBar accounts={accounts} onImport={handleImport} />
@@ -177,6 +246,9 @@ export default function App() {
           {view === 'calculator' && <Calculator />}
           {view === 'progress' && <ProgressTab />}
           {view === 'splits' && <SplitsManager />}
+          {view === 'guide' && (
+            <BudgetGuide categories={categories} onSetCategory={handleSetCategory} />
+          )}
           {view === 'settings' && <SettingsManager />}
         </main>
       </div>

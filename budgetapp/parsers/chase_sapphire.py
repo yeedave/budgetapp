@@ -24,7 +24,7 @@ _TX_LINE = re.compile(r"^(\d{2}/\d{2})\s+(.+?)\s+(-?[\d,]+\.\d{2})$")
 
 
 class ChaseSapphireParser(AbstractParser):
-    account_id = "chase_sapphire"
+    format_name = "Chase Sapphire"
 
     def parse(self, pdf_path: Path) -> pd.DataFrame:
         lines: list[str] = []
@@ -87,7 +87,6 @@ class ChaseSapphireParser(AbstractParser):
                 "description": desc.strip(),
                 "raw_description": desc.strip(),
                 "amount": amount,
-                "account_id": self.account_id,
             })
 
         return rows

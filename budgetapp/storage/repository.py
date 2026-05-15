@@ -335,6 +335,26 @@ class Repository:
         self.conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
         self.conn.commit()
 
+    def get_orphaned_account_ids(self) -> list[dict]:
+        """Return account_ids that appear in transactions but have no accounts row."""
+        rows = self.conn.execute("""
+            SELECT t.account_id, COUNT(*) AS tx_count
+            FROM transactions t
+            LEFT JOIN accounts a ON t.account_id = a.id
+            WHERE a.id IS NULL
+            GROUP BY t.account_id
+            ORDER BY t.account_id
+        """).fetchall()
+        return [{"account_id": r["account_id"], "tx_count": r["tx_count"]} for r in rows]
+
+    def delete_transactions_for_account(self, account_id: str) -> int:
+        """Delete all transactions for an orphaned account_id. Returns deleted count."""
+        result = self.conn.execute(
+            "DELETE FROM transactions WHERE account_id = ?", (account_id,)
+        )
+        self.conn.commit()
+        return result.rowcount
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -712,6 +732,116 @@ class Repository:
 
         results.sort(key=lambda x: x["avg_amount"], reverse=True)
         return results[:50]
+
+    # ------------------------------------------------------------------
+    # Budget guide
+    # ------------------------------------------------------------------
+
+    def get_budget_guide(self) -> dict:
+        from collections import defaultdict
+        from datetime import date, timedelta
+
+        BUCKET_KEYWORDS: dict[str, list[str]] = {
+            "bills": [
+                "rent", "mortgage", "electric", "utility", "utilities", "insurance",
+                "internet", "phone", "at&t", "verizon", "t-mobile", "comcast",
+                "xfinity", "spectrum", "loan payment", "auto payment", "car payment",
+                "water", "sewer", "trash", "pge", "con ed", "pseg", "national grid",
+                "lease", "hoa",
+            ],
+            "subscriptions": [
+                "netflix", "spotify", "hulu", "disney", "amazon prime", "apple.com",
+                "google one", "youtube", "gym", "fitness", "membership",
+                "icloud", "dropbox", "adobe", "microsoft 365", "office 365",
+                "linkedin", "audible", "paramount", "peacock", "crunchyroll",
+                "duolingo", "nytimes", "wsj",
+            ],
+            "income": [
+                "payroll", "direct dep", "salary", "paycheck", "ach deposit",
+                "zelle from", "venmo from",
+            ],
+            "savings": [
+                "transfer to sav", "online transfer", "marcus", "ally",
+                "wealthfront", "fidelity", "vanguard", "acorns", "sofi",
+            ],
+            "debts": [
+                "student loan", "navient", "sallie mae", "auto loan",
+                "personal loan",
+            ],
+        }
+
+        def suggest_bucket(desc: str) -> str | None:
+            dl = desc.lower()
+            for bucket, kws in BUCKET_KEYWORDS.items():
+                for kw in kws:
+                    if kw in dl:
+                        return bucket
+            return None
+
+        # Overall stats
+        total = self.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+        cat_count = self.conn.execute(
+            "SELECT COUNT(*) FROM transactions WHERE category_id IS NOT NULL"
+        ).fetchone()[0]
+
+        # Uncategorized — group by description
+        rows = self.conn.execute(
+            """SELECT id, description, CAST(amount AS REAL) AS amount, date
+               FROM transactions WHERE category_id IS NULL
+               ORDER BY description, date DESC"""
+        ).fetchall()
+
+        groups: dict = defaultdict(lambda: {"amounts": [], "last_date": None, "sample_id": None})
+        for r in rows:
+            g = groups[r["description"]]
+            g["amounts"].append(abs(float(r["amount"])))
+            if g["last_date"] is None:
+                g["last_date"] = r["date"]
+                g["sample_id"] = r["id"]
+
+        uncategorized = []
+        for desc, g in groups.items():
+            uncategorized.append({
+                "description": desc,
+                "avg_amount": round(sum(g["amounts"]) / len(g["amounts"]), 2),
+                "occurrences": len(g["amounts"]),
+                "last_date": g["last_date"],
+                "suggested_bucket": suggest_bucket(desc),
+                "sample_tx_id": g["sample_id"],
+            })
+
+        # Sort: suggested items first (grouped by bucket), then by occurrences
+        uncategorized.sort(key=lambda x: (x["suggested_bucket"] is None, -x["occurrences"]))
+
+        # Category avg monthly spend over last 3 complete months
+        today = date.today()
+        y, m = today.year, today.month - 3
+        if m <= 0:
+            m += 12
+            y -= 1
+        cutoff = date(y, m, 1).isoformat()
+
+        cat_rows = self.conn.execute(
+            """SELECT c.id, c.name, c.bucket, c.budget_amount,
+                      ROUND(ABS(SUM(CASE WHEN t.date >= ? THEN CAST(t.amount AS REAL) ELSE 0 END)) / 3.0, 2) AS avg_monthly
+               FROM categories c
+               LEFT JOIN transactions t ON t.category_id = c.id
+               WHERE c.bucket != 'transfers'
+               GROUP BY c.id
+               ORDER BY c.bucket, c.name""",
+            (cutoff,),
+        ).fetchall()
+
+        return {
+            "stats": {
+                "total": total,
+                "categorized": cat_count,
+                "uncategorized": total - cat_count,
+                "pct": round(cat_count / total * 100) if total else 0,
+            },
+            "uncategorized": uncategorized,
+            "categories": [{k: r[k] for k in r.keys()} for r in cat_rows],
+        }
 
     # ------------------------------------------------------------------
     # Import log

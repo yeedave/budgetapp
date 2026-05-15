@@ -428,15 +428,13 @@ export default function TransactionTable({
                         </button>
                       </td>
                       <td className="px-2 py-2.5">
-                        {tx.is_manual && (
-                          <button
-                            onClick={() => onDeleteTransaction(tx.id)}
-                            className="text-gray-300 hover:text-red-500 transition-colors text-xs"
-                            title="Delete manual transaction"
-                          >
-                            ✕
-                          </button>
-                        )}
+                        <button
+                          onClick={() => onDeleteTransaction(tx.id)}
+                          className="text-gray-300 hover:text-red-500 transition-colors text-xs"
+                          title="Delete transaction"
+                        >
+                          ✕
+                        </button>
                       </td>
                     </tr>
                     {isSplitOpen && (

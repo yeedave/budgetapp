@@ -14,7 +14,7 @@ _SKIP_DESC = {'BeginningBalance'}  # EndingBalance handled separately to capture
 
 
 class MarcusHYSAParser(AbstractParser):
-    account_id = "marcus_hysa"
+    format_name = "Marcus HYSA"
 
     def parse(self, pdf_path: Path) -> pd.DataFrame:
         records = []
@@ -87,10 +87,10 @@ class MarcusHYSAParser(AbstractParser):
                         'description': desc,
                         'raw_description': desc,
                         'amount': amount,
-                        'account_id': self.account_id,
                     })
 
         df = pd.DataFrame(records)
+        df.attrs['format_name'] = self.format_name
         if ending_balance is not None:
             df.attrs['ending_balance'] = ending_balance
         return df

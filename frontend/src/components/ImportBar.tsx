@@ -11,8 +11,7 @@ type Phase = 'idle' | 'parsing' | 'confirming' | 'importing'
 
 export default function ImportBar({ accounts, onImport }: Props) {
   const [phase, setPhase] = useState<Phase>('idle')
-  const [detectedId, setDetectedId] = useState('')
-  const [detectedName, setDetectedName] = useState('')
+  const [detectedFormat, setDetectedFormat] = useState('')
   const [count, setCount] = useState(0)
   const [selectedId, setSelectedId] = useState('')
   const [status, setStatus] = useState<{ msg: string; ok: boolean } | null>(null)
@@ -30,17 +29,16 @@ export default function ImportBar({ accounts, onImport }: Props) {
       setStatus({ msg: result.error, ok: false })
       return
     }
-    setDetectedId(result.detected_account_id ?? '')
-    setDetectedName(result.detected_account_name ?? result.detected_account_id ?? 'Unknown')
+    setDetectedFormat(result.detected_format ?? 'Unknown format')
     setCount(result.count ?? 0)
-    setSelectedId(result.detected_account_id ?? '')
+    setSelectedId('')
     setPhase('confirming')
   }
 
   async function handleConfirm() {
+    if (!selectedId) return
     setPhase('importing')
-    const override = selectedId !== detectedId ? selectedId : ''
-    const result = await confirmImport(override)
+    const result = await confirmImport(selectedId)
     setPhase('idle')
     if (result.error) {
       setStatus({ msg: result.error, ok: false })
@@ -56,8 +54,6 @@ export default function ImportBar({ accounts, onImport }: Props) {
     setPhase('idle')
     setStatus(null)
   }
-
-  const isOverride = selectedId && selectedId !== detectedId
 
   return (
     <div className="flex items-center gap-2 relative">
@@ -80,33 +76,30 @@ export default function ImportBar({ accounts, onImport }: Props) {
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Confirm Import</p>
 
           <div className="mb-3">
-            <p className="text-xs text-gray-500 mb-1">Detected account</p>
-            <p className="text-sm font-medium text-gray-800">{detectedName}</p>
+            <p className="text-xs text-gray-500 mb-1">Detected format</p>
+            <p className="text-sm font-medium text-gray-800">{detectedFormat}</p>
             <p className="text-xs text-gray-400">{count} transaction{count !== 1 ? 's' : ''} found</p>
           </div>
 
           <div className="mb-4">
-            <label className="text-xs text-gray-500 mb-1 block">Import as account</label>
+            <label className="text-xs text-gray-500 mb-1 block">Import into account</label>
             <select
               value={selectedId}
               onChange={(e) => setSelectedId(e.target.value)}
               className="w-full text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400"
             >
+              <option value="">— select account —</option>
               {accounts.map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
             </select>
-            {isOverride && (
-              <p className="text-xs text-amber-600 mt-1">
-                Overriding detected account
-              </p>
-            )}
           </div>
 
           <div className="flex gap-2">
             <button
               onClick={handleConfirm}
-              className="flex-1 text-sm px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors"
+              disabled={!selectedId}
+              className="flex-1 text-sm px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors"
             >
               Import
             </button>

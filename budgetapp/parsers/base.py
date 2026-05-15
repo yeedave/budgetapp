@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pandas as pd
 
-# Normalized columns every parser must produce
+# Normalized columns every parser must produce.
+# account_id is NOT included — the bridge assigns it from user input at import time.
 TRANSACTION_COLUMNS = [
-    "date",         # datetime.date
-    "description",  # str — cleaned
+    "date",             # datetime.date
+    "description",      # str — cleaned
     "raw_description",  # str — original from PDF
-    "amount",       # Decimal, negative = expense, positive = income/credit
-    "account_id",   # str — matches accounts table
+    "amount",           # Decimal, negative = expense, positive = income/credit
 ]
 
 
@@ -27,7 +27,7 @@ def year_for_tx(statement_year: int, statement_end_month: int, tx_month: int) ->
 
 
 class AbstractParser(ABC):
-    account_id: str  # subclasses declare this
+    format_name: str  # subclasses declare a human-readable format label
 
     @abstractmethod
     def parse(self, pdf_path: Path) -> pd.DataFrame:

@@ -199,3 +199,26 @@ export interface UpcomingBill {
   due_date: string
   days_until: number
 }
+
+export interface BudgetGuideItem {
+  description: string
+  avg_amount: number
+  occurrences: number
+  last_date: string
+  suggested_bucket: string | null
+  sample_tx_id: string
+}
+
+export interface BudgetGuideCategory {
+  id: string
+  name: string
+  bucket: string
+  budget_amount: string | null
+  avg_monthly: number
+}
+
+export interface BudgetGuideData {
+  stats: { total: number; categorized: number; uncategorized: number; pct: number }
+  uncategorized: BudgetGuideItem[]
+  categories: BudgetGuideCategory[]
+}

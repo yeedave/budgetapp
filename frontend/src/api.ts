@@ -1,4 +1,4 @@
-import type { Account, Category, Transaction, ImportResult, DebtItem, DebtPlan, SavingsTracker, ProgressData, Rule, BudgetSnapshot, NetWorth, MonthlyTrends, RecurringItem, UpcomingBill, Split, ImportLogEntry } from './types'
+import type { Account, Category, Transaction, ImportResult, DebtItem, DebtPlan, SavingsTracker, ProgressData, Rule, BudgetSnapshot, NetWorth, MonthlyTrends, RecurringItem, UpcomingBill, Split, ImportLogEntry, BudgetGuideData } from './types'
 
 // Extend Window with the pywebview API shape
 interface PywebviewApi {
@@ -8,7 +8,7 @@ interface PywebviewApi {
   get_transactions: (account_id: string, month: string) => Promise<Transaction[]>
   import_statement: (account_id: string) => Promise<ImportResult>
   import_any_statement: () => Promise<ImportResult>
-  preview_statement: () => Promise<{ detected_account_id?: string; detected_account_name?: string; count?: number; cancelled?: boolean; error?: string }>
+  preview_statement: () => Promise<{ detected_format?: string; count?: number; cancelled?: boolean; error?: string }>
   confirm_import: (force_account_id: string) => Promise<ImportResult>
   set_category: (tx_id: string, category_id: string) => Promise<{ updated_ids: string[] }>
   add_transaction: (date: string, description: string, amount: string, account_id: string, category_id: string) => Promise<Transaction>
@@ -53,6 +53,9 @@ interface PywebviewApi {
   delete_split: (split_id: string) => Promise<void>
   save_debt_due_day: (debt_id: string, due_day: number | null) => Promise<void>
   get_import_log: (account_id: string) => Promise<ImportLogEntry[]>
+  get_budget_guide: () => Promise<BudgetGuideData>
+  get_orphaned_account_ids: () => Promise<{ account_id: string; tx_count: number }[]>
+  delete_transactions_for_account: (account_id: string) => Promise<{ ok: boolean; deleted: number }>
 }
 
 declare global {
@@ -142,3 +145,6 @@ export const settleSplit = (splitId: string) => api().settle_split(splitId)
 export const deleteSplit = (splitId: string) => api().delete_split(splitId)
 export const saveDebtDueDay = (debtId: string, dueDay: number | null) => api().save_debt_due_day(debtId, dueDay)
 export const getImportLog = (accountId = '') => api().get_import_log(accountId)
+export const getBudgetGuide = () => api().get_budget_guide()
+export const getOrphanedAccountIds = () => api().get_orphaned_account_ids()
+export const deleteTransactionsForAccount = (accountId: string) => api().delete_transactions_for_account(accountId)
