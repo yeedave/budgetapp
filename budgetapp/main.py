@@ -8,6 +8,18 @@ from budgetapp.api.bridge import Api
 from budgetapp.config.settings import APP_HEIGHT, APP_ICON, APP_NAME, APP_WIDTH, BACKUP_DIR, FRONTEND_DIST
 
 
+def _set_macos_app_name(name: str) -> None:
+    """Set CFBundleName so the dock label shows the app name, not 'python3.12'."""
+    try:
+        import AppKit
+        bundle = AppKit.NSBundle.mainBundle()
+        info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+        info['CFBundleName'] = name
+        info['CFBundleDisplayName'] = name
+    except Exception:
+        pass
+
+
 def _maybe_auto_backup(api: Api) -> None:
     settings = api.get_settings()
     last = settings.get("last_backup", "")
@@ -23,6 +35,7 @@ def _maybe_auto_backup(api: Api) -> None:
 
 
 def main() -> None:
+    _set_macos_app_name(APP_NAME)
     dev = "--dev" in sys.argv or not (FRONTEND_DIST / "index.html").exists()
     url = "http://localhost:5173" if dev else str(FRONTEND_DIST / "index.html")
 
