@@ -888,7 +888,13 @@ class Api:
                          "cache_control": {"type": "ephemeral"}}],
                 messages=messages,
             )
-            return {"content": response.content[0].text}
+            return {
+                "content": response.content[0].text,
+                "usage": {
+                    "input_tokens": response.usage.input_tokens,
+                    "output_tokens": response.usage.output_tokens,
+                },
+            }
 
         except Exception as exc:
             return {"error": str(exc)}

@@ -58,7 +58,7 @@ interface PywebviewApi {
   get_budget_guide: () => Promise<BudgetGuideData>
   get_orphaned_account_ids: () => Promise<{ account_id: string; tx_count: number }[]>
   delete_transactions_for_account: (account_id: string) => Promise<{ ok: boolean; deleted: number }>
-  chat_advisor: (messages: { role: string; content: string }[]) => Promise<{ content?: string; error?: string }>
+  chat_advisor: (messages: { role: string; content: string }[]) => Promise<{ content?: string; error?: string; usage?: { input_tokens: number; output_tokens: number } }>
   get_calendar_data: (year_month: string) => Promise<CalendarData>
   generate_rules_from_transactions: (month?: string) => Promise<GenerateRulesResult>
   apply_rule_suggestions: (new_categories: CategorySuggestion[], rules: RuleSuggestion[]) => Promise<{ ok: boolean; created_categories: number; created_rules: number; error?: string }>
@@ -159,7 +159,8 @@ export const getImportLog = (accountId = '') => api().get_import_log(accountId)
 export const getBudgetGuide = () => api().get_budget_guide()
 export const getOrphanedAccountIds = () => api().get_orphaned_account_ids()
 export const deleteTransactionsForAccount = (accountId: string) => api().delete_transactions_for_account(accountId)
-export const chatAdvisor = (messages: { role: string; content: string }[]) => api().chat_advisor(messages)
+export const chatAdvisor = (messages: { role: string; content: string }[]) =>
+  api().chat_advisor(messages) as Promise<{ content?: string; error?: string; usage?: { input_tokens: number; output_tokens: number } }>
 export const getCalendarData = (yearMonth: string) => api().get_calendar_data(yearMonth)
 export const generateRulesFromTransactions = (month = '') => api().generate_rules_from_transactions(month)
 export const applyRuleSuggestions = (newCategories: CategorySuggestion[], rules: RuleSuggestion[]) => api().apply_rule_suggestions(newCategories, rules)

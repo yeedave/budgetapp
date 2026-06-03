@@ -221,7 +221,10 @@ export default function Advisor() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [usage, setUsage] = useState<{ input: number; output: number } | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  const CONTEXT_LIMIT = 200_000
 
   // Generate rules state
   const [genMonth, setGenMonth] = useState('')   // '' = all time
@@ -260,6 +263,7 @@ export default function Advisor() {
     setError(null)
     const result = await chatAdvisor(next.map((m) => ({ role: m.role, content: m.content })))
     setLoading(false)
+    if (result.usage) setUsage({ input: result.usage.input_tokens, output: result.usage.output_tokens })
     if (result.error) setError(result.error)
     else if (result.content) setMessages([...next, { role: 'assistant', content: result.content }])
   }
@@ -470,6 +474,22 @@ export default function Advisor() {
           )}
         </div>
       </div>
+
+      {/* Token usage bar */}
+      {usage && (() => {
+        const pct = Math.min(usage.input / CONTEXT_LIMIT * 100, 100)
+        const color = pct < 50 ? 'bg-green-400' : pct < 80 ? 'bg-yellow-400' : 'bg-red-500'
+        return (
+          <div className="shrink-0 px-4 py-1.5 bg-white border-b border-gray-100 flex items-center gap-3">
+            <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+              <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
+            </div>
+            <span className="text-xs text-gray-400 whitespace-nowrap tabular-nums">
+              {usage.input.toLocaleString()} / {CONTEXT_LIMIT.toLocaleString()} tokens
+            </span>
+          </div>
+        )
+      })()}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
