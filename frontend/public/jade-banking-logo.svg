@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Outer ring -->
+  <circle cx="32" cy="32" r="30" fill="none" stroke="#15803d" stroke-width="3"/>
+  <!-- Background fill -->
+  <circle cx="32" cy="32" r="28.5" fill="white"/>
+  <!-- Bar chart (3 rising bars) -->
+  <rect x="14" y="42" width="7" height="8"  rx="1" fill="#4ade80" opacity="0.7"/>
+  <rect x="24" y="36" width="7" height="14" rx="1" fill="#22c55e" opacity="0.85"/>
+  <rect x="34" y="28" width="7" height="22" rx="1" fill="#15803d"/>
+  <!-- Growth arrow -->
+  <path d="M14 44 Q28 30 44 20" fill="none" stroke="#15803d" stroke-width="2" stroke-linecap="round"/>
+  <polygon points="44,20 38,22 42,27" fill="#15803d"/>
+  <!-- Leaf at bottom -->
+  <path d="M18 52 Q32 44 46 52 Q32 60 18 52Z" fill="#15803d" opacity="0.2"/>
+  <!-- J letterform -->
+  <text x="32" y="27" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="22" font-weight="700" fill="#15803d">J</text>
+</svg>

@@ -94,7 +94,7 @@ def categorize(df: pd.DataFrame, repo: Repository, use_ai: bool = True) -> pd.Da
         lambda desc: _apply_rules(desc, rules)
     )
 
-    # Claude fallback for unmatched rows
+    # Claude fallback for still-unmatched rows
     if use_ai and os.environ.get("ANTHROPIC_API_KEY"):
         unmatched_mask = df["category_id"].isna()
         unmatched_descs = df.loc[unmatched_mask, "description"].tolist()

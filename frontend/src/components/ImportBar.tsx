@@ -66,7 +66,7 @@ export default function ImportBar({ accounts, onImport }: Props) {
       <button
         onClick={handlePickFile}
         disabled={phase !== 'idle'}
-        className="text-sm px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+        className="text-sm px-3 py-1.5 bg-green-700 text-white rounded hover:bg-green-800 disabled:opacity-50 transition-colors"
       >
         {phase === 'parsing' ? 'Reading…' : phase === 'importing' ? 'Importing…' : 'Import Statement'}
       </button>
@@ -86,7 +86,7 @@ export default function ImportBar({ accounts, onImport }: Props) {
             <select
               value={selectedId}
               onChange={(e) => setSelectedId(e.target.value)}
-              className="w-full text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="w-full text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-500"
             >
               <option value="">— select account —</option>
               {accounts.map((a) => (
@@ -99,7 +99,7 @@ export default function ImportBar({ accounts, onImport }: Props) {
             <button
               onClick={handleConfirm}
               disabled={!selectedId}
-              className="flex-1 text-sm px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+              className="flex-1 text-sm px-3 py-1.5 bg-green-700 text-white rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
             >
               Import
             </button>

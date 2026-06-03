@@ -98,7 +98,7 @@ export default function CategoryManager({ categories, onCategoriesChange }: Prop
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-400">Name</label>
             <input
-              className="border rounded px-2 py-1.5 text-sm w-52 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="border rounded px-2 py-1.5 text-sm w-52 focus:outline-none focus:ring-2 focus:ring-green-500"
               placeholder="e.g. Cam's Income"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -108,7 +108,7 @@ export default function CategoryManager({ categories, onCategoriesChange }: Prop
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-400">Bucket</label>
             <select
-              className="border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
               value={bucket}
               onChange={(e) => setBucket(e.target.value)}
             >
@@ -120,7 +120,7 @@ export default function CategoryManager({ categories, onCategoriesChange }: Prop
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-400">Owner</label>
             <select
-              className="border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
               value={owner}
               onChange={(e) => setOwner(e.target.value)}
             >
@@ -132,7 +132,7 @@ export default function CategoryManager({ categories, onCategoriesChange }: Prop
           <button
             onClick={handleAdd}
             disabled={!name.trim() || saving}
-            className="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+            className="px-4 py-1.5 bg-green-700 text-white text-sm rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
           >
             {saving ? 'Adding…' : 'Add'}
           </button>
@@ -177,7 +177,7 @@ export default function CategoryManager({ categories, onCategoriesChange }: Prop
                         <div className="flex items-center gap-0.5 text-xs text-gray-400">
                           <span>$</span>
                           <input
-                            className="w-20 border rounded px-1.5 py-0.5 text-xs text-right text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                            className="w-20 border rounded px-1.5 py-0.5 text-xs text-right text-gray-700 focus:outline-none focus:ring-1 focus:ring-green-500"
                             value={budgetInputs[cat.id] ?? ''}
                             placeholder="—"
                             onChange={(e) =>
@@ -217,7 +217,7 @@ export default function CategoryManager({ categories, onCategoriesChange }: Prop
                 Pattern <span className="font-normal text-gray-300">(regex, case-insensitive)</span>
               </label>
               <input
-                className="border rounded px-2 py-1.5 text-sm w-64 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                className="border rounded px-2 py-1.5 text-sm w-64 font-mono focus:outline-none focus:ring-2 focus:ring-green-500"
                 placeholder="e.g. Online Transfer.*Way2Save"
                 value={rulePattern}
                 onChange={(e) => setRulePattern(e.target.value)}
@@ -227,7 +227,7 @@ export default function CategoryManager({ categories, onCategoriesChange }: Prop
             <div className="flex flex-col gap-1">
               <label className="text-xs text-gray-400">Category</label>
               <select
-                className="border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                className="border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                 value={ruleCategoryId}
                 onChange={(e) => setRuleCategoryId(e.target.value)}
               >
@@ -244,7 +244,7 @@ export default function CategoryManager({ categories, onCategoriesChange }: Prop
             <button
               onClick={handleAddRule}
               disabled={!rulePattern.trim() || !ruleCategoryId || ruleSaving}
-              className="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+              className="px-4 py-1.5 bg-green-700 text-white text-sm rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
             >
               {ruleSaving ? 'Adding…' : 'Add Rule'}
             </button>

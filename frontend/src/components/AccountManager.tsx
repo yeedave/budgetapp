@@ -192,7 +192,7 @@ export default function AccountManager({ accounts, onAccountsChange }: Props) {
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-400">Name</label>
             <input
-              className="border rounded px-2 py-1.5 text-sm w-48 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="border rounded px-2 py-1.5 text-sm w-48 focus:outline-none focus:ring-2 focus:ring-green-500"
               placeholder="e.g. Chase Sapphire"
               value={addState.name}
               onChange={(e) => setAddState((s) => ({ ...s, name: e.target.value }))}
@@ -202,7 +202,7 @@ export default function AccountManager({ accounts, onAccountsChange }: Props) {
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-400">Bank</label>
             <input
-              className="border rounded px-2 py-1.5 text-sm w-32 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="border rounded px-2 py-1.5 text-sm w-32 focus:outline-none focus:ring-2 focus:ring-green-500"
               placeholder="e.g. chase"
               value={addState.bank}
               onChange={(e) => setAddState((s) => ({ ...s, bank: e.target.value }))}
@@ -212,7 +212,7 @@ export default function AccountManager({ accounts, onAccountsChange }: Props) {
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-400">Type</label>
             <select
-              className="border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
               value={addState.account_type}
               onChange={(e) => setAddState((s) => ({ ...s, account_type: e.target.value }))}
             >
@@ -222,7 +222,7 @@ export default function AccountManager({ accounts, onAccountsChange }: Props) {
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-400">Owner</label>
             <select
-              className="border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
               value={addState.owner}
               onChange={(e) => setAddState((s) => ({ ...s, owner: e.target.value }))}
             >
@@ -232,7 +232,7 @@ export default function AccountManager({ accounts, onAccountsChange }: Props) {
           <button
             onClick={handleAdd}
             disabled={!addState.name.trim() || adding}
-            className="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+            className="px-4 py-1.5 bg-green-700 text-white text-sm rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
           >
             {adding ? 'Adding…' : 'Add'}
           </button>
@@ -271,28 +271,28 @@ export default function AccountManager({ accounts, onAccountsChange }: Props) {
           <tbody className="divide-y divide-gray-100">
             {accounts.map((acct, i) =>
               editingId === acct.id ? (
-                <tr key={acct.id} className="bg-indigo-50">
+                <tr key={acct.id} className="bg-green-50">
                   <td className="px-3 py-2" />
                   <td className="px-3 py-2">
                     <ColorDot color={editState.color || null} />
                   </td>
                   <td className="px-3 py-2">
                     <input
-                      className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                       value={editState.name}
                       onChange={(e) => setEditState((s) => ({ ...s, name: e.target.value }))}
                     />
                   </td>
                   <td className="px-3 py-2">
                     <input
-                      className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                       value={editState.bank}
                       onChange={(e) => setEditState((s) => ({ ...s, bank: e.target.value }))}
                     />
                   </td>
                   <td className="px-3 py-2">
                     <select
-                      className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                       value={editState.account_type}
                       onChange={(e) => setEditState((s) => ({ ...s, account_type: e.target.value }))}
                     >
@@ -301,7 +301,7 @@ export default function AccountManager({ accounts, onAccountsChange }: Props) {
                   </td>
                   <td className="px-3 py-2">
                     <select
-                      className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                       value={editState.owner}
                       onChange={(e) => setEditState((s) => ({ ...s, owner: e.target.value }))}
                     >
@@ -313,7 +313,7 @@ export default function AccountManager({ accounts, onAccountsChange }: Props) {
                       <button
                         onClick={() => handleSaveEdit(acct.id)}
                         disabled={!editState.name.trim() || saving}
-                        className="text-xs px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+                        className="text-xs px-2 py-1 bg-green-700 text-white rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
                       >
                         {saving ? '…' : 'Save'}
                       </button>
@@ -334,7 +334,7 @@ export default function AccountManager({ accounts, onAccountsChange }: Props) {
                 <tr
                   key={acct.id}
                   className={`group transition-colors ${
-                    dragOver === i ? 'border-t-2 border-indigo-400 bg-indigo-50' : 'hover:bg-gray-50'
+                    dragOver === i ? 'border-t-2 border-green-500 bg-green-50' : 'hover:bg-gray-50'
                   }`}
                   draggable
                   onDragStart={() => handleDragStart(i)}
@@ -356,7 +356,7 @@ export default function AccountManager({ accounts, onAccountsChange }: Props) {
                     <div className="flex gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={() => handleEdit(acct)}
-                        className="text-xs px-2 py-1 text-gray-500 hover:text-indigo-600 transition-colors"
+                        className="text-xs px-2 py-1 text-gray-500 hover:text-green-700 transition-colors"
                       >
                         Edit
                       </button>

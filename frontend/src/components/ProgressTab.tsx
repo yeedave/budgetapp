@@ -28,7 +28,7 @@ function XpBar({ pct, label }: { pct: number; label: string }) {
       </div>
       <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
         <div
-          className="h-full rounded-full bg-indigo-500 transition-all duration-700"
+          className="h-full rounded-full bg-green-600 transition-all duration-700"
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -85,7 +85,7 @@ export default function ProgressTab() {
             }
           />
           <div className="text-xs text-gray-400">
-            Total XP earned: <span className="font-semibold text-indigo-600">{fmtXp(data.xp_total)}</span>
+            Total XP earned: <span className="font-semibold text-green-700">{fmtXp(data.xp_total)}</span>
             {' '}(1 XP = $1 paid toward principal)
           </div>
         </div>
@@ -100,12 +100,12 @@ export default function ProgressTab() {
           <div
             key={lvl.level}
             className={`px-5 py-3 flex items-center gap-4 ${
-              data.level === lvl.level ? 'bg-indigo-50' : ''
+              data.level === lvl.level ? 'bg-green-50' : ''
             }`}
           >
             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
               lvl.unlocked
-                ? 'bg-indigo-500 text-white'
+                ? 'bg-green-600 text-white'
                 : 'bg-gray-100 text-gray-400'
             }`}>
               {lvl.unlocked ? '★' : lvl.level}
@@ -117,7 +117,7 @@ export default function ProgressTab() {
               <div className="text-xs text-gray-400">{fmtXp(lvl.min_xp)} XP</div>
             </div>
             {data.level === lvl.level && (
-              <span className="text-xs font-semibold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-full">
+              <span className="text-xs font-semibold text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
                 Current
               </span>
             )}
@@ -147,14 +147,14 @@ export default function ProgressTab() {
             type="number"
             min={0}
             max={100}
-            className="border rounded px-2 py-1 text-sm w-20 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            className="border rounded px-2 py-1 text-sm w-20 focus:outline-none focus:ring-2 focus:ring-green-500"
             value={prizePct}
             onChange={(e) => setPrizePct(e.target.value)}
           />
           <button
             onClick={handleSavePrizePct}
             disabled={savingPct}
-            className="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+            className="px-3 py-1.5 bg-green-700 text-white text-sm rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
           >
             {savingPct ? 'Saving…' : 'Save'}
           </button>
@@ -177,7 +177,7 @@ export default function ProgressTab() {
             const date = new Date(ev.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
             return (
               <div key={ev.id} className="px-5 py-3 flex items-center gap-3">
-                <span className={`text-lg ${isPayoff ? 'text-yellow-500' : 'text-indigo-400'}`}>
+                <span className={`text-lg ${isPayoff ? 'text-yellow-500' : 'text-green-500'}`}>
                   {isPayoff ? '🏆' : '+'}
                 </span>
                 <div className="flex-1">
@@ -186,7 +186,7 @@ export default function ProgressTab() {
                   </div>
                   <div className="text-xs text-gray-400">{date}</div>
                 </div>
-                <div className="text-sm font-semibold tabular-nums text-indigo-600">
+                <div className="text-sm font-semibold tabular-nums text-green-700">
                   +{fmtXp(xp)} XP
                 </div>
               </div>

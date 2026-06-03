@@ -26,7 +26,7 @@ const fmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' 
 
 function SortIndicator({ col, sort }: { col: SortColumn; sort: SortState }) {
   if (sort.col !== col) return <span className="opacity-0 w-3">↕</span>
-  return <span className="text-indigo-500">{sort.dir === 'asc' ? '↑' : '↓'}</span>
+  return <span className="text-green-600">{sort.dir === 'asc' ? '↑' : '↓'}</span>
 }
 
 function formatAmount(amount: string) {
@@ -262,8 +262,8 @@ export default function TransactionTable({
             onClick={() => { setShowOrganize((v) => !v); setOrganizeStatus(null) }}
             className={`text-xs px-3 py-1.5 rounded border transition-colors ${
               showOrganize
-                ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
-                : 'border-gray-200 text-gray-500 hover:border-indigo-300 hover:text-indigo-600'
+                ? 'bg-green-50 border-green-400 text-green-800'
+                : 'border-gray-200 text-gray-500 hover:border-green-400 hover:text-green-700'
             }`}
           >
             Auto-organize
@@ -280,7 +280,7 @@ export default function TransactionTable({
           </button>
           <button
             onClick={() => { setShowAdd((v) => !v); setForm(blankForm(accounts)) }}
-            className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors"
+            className="text-xs px-3 py-1.5 bg-green-700 text-white rounded hover:bg-green-800 transition-colors"
           >
             + Add Transaction
           </button>
@@ -347,26 +347,26 @@ export default function TransactionTable({
 
       {/* Auto-organize panel */}
       {showOrganize && (
-        <div className="px-4 py-3 bg-indigo-50 border-b shrink-0">
+        <div className="px-4 py-3 bg-green-50 border-b shrink-0">
           <div className="flex flex-wrap gap-2 items-center">
             <button
               onClick={() => handleOrganize('uncategorized')}
               disabled={organizing !== null}
-              className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors whitespace-nowrap"
+              className="text-xs px-3 py-1.5 bg-green-700 text-white rounded hover:bg-green-800 disabled:opacity-40 transition-colors whitespace-nowrap"
             >
               {organizing === 'uncategorized' ? 'Running…' : 'Rules → Uncategorized'}
             </button>
             <button
               onClick={() => handleOrganize('all')}
               disabled={organizing !== null}
-              className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors whitespace-nowrap"
+              className="text-xs px-3 py-1.5 bg-green-700 text-white rounded hover:bg-green-800 disabled:opacity-40 transition-colors whitespace-nowrap"
             >
               {organizing === 'all' ? 'Running…' : 'Rules → All'}
             </button>
             <button
               onClick={() => handleOrganize('ai')}
               disabled={organizing !== null}
-              className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors whitespace-nowrap"
+              className="text-xs px-3 py-1.5 bg-green-700 text-white rounded hover:bg-green-800 disabled:opacity-40 transition-colors whitespace-nowrap"
             >
               {organizing === 'ai' ? 'Categorizing…' : 'AI → Uncategorized'}
             </button>
@@ -376,7 +376,7 @@ export default function TransactionTable({
               </span>
             )}
           </div>
-          <p className="text-xs text-indigo-600 mt-1.5">
+          <p className="text-xs text-green-700 mt-1.5">
             "Rules → All" clears existing categories and re-runs from scratch. AI mode uses Claude for unmatched transactions.
           </p>
         </div>
@@ -447,13 +447,13 @@ export default function TransactionTable({
 
       {/* Add form */}
       {showAdd && (
-        <div className="px-4 py-3 bg-indigo-50 border-b shrink-0">
+        <div className="px-4 py-3 bg-green-50 border-b shrink-0">
           <div className="flex flex-wrap gap-2 items-end">
             <div className="flex flex-col gap-1">
               <label className="text-xs text-gray-500">Date</label>
               <input
                 type="date"
-                className="border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                className="border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                 value={form.date}
                 onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
               />
@@ -461,7 +461,7 @@ export default function TransactionTable({
             <div className="flex flex-col gap-1">
               <label className="text-xs text-gray-500">Description</label>
               <input
-                className="border rounded px-2 py-1 text-sm w-52 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                className="border rounded px-2 py-1 text-sm w-52 focus:outline-none focus:ring-2 focus:ring-green-500"
                 placeholder="e.g. Starbucks"
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
@@ -470,7 +470,7 @@ export default function TransactionTable({
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-xs text-gray-500">Amount</label>
-              <div className="flex items-center border rounded overflow-hidden focus-within:ring-2 focus-within:ring-indigo-400">
+              <div className="flex items-center border rounded overflow-hidden focus-within:ring-2 focus-within:ring-green-500">
                 <button
                   className={`px-2 py-1 text-xs font-semibold border-r shrink-0 ${form.isExpense ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}
                   onClick={() => setForm((f) => ({ ...f, isExpense: !f.isExpense }))}
@@ -490,7 +490,7 @@ export default function TransactionTable({
             <div className="flex flex-col gap-1">
               <label className="text-xs text-gray-500">Account</label>
               <select
-                className="border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                className="border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                 value={form.account_id}
                 onChange={(e) => setForm((f) => ({ ...f, account_id: e.target.value }))}
               >
@@ -500,7 +500,7 @@ export default function TransactionTable({
             <div className="flex flex-col gap-1">
               <label className="text-xs text-gray-500">Category</label>
               <select
-                className="border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                className="border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                 value={form.category_id}
                 onChange={(e) => setForm((f) => ({ ...f, category_id: e.target.value }))}
               >
@@ -515,7 +515,7 @@ export default function TransactionTable({
             <button
               onClick={handleSubmitAdd}
               disabled={saving || !form.description.trim() || !form.amount || !form.account_id}
-              className="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+              className="px-4 py-1.5 bg-green-700 text-white text-sm rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
             >
               {saving ? 'Saving…' : 'Save'}
             </button>
@@ -526,7 +526,7 @@ export default function TransactionTable({
               Cancel
             </button>
           </div>
-          <p className="text-xs text-indigo-500 mt-2">
+          <p className="text-xs text-green-600 mt-2">
             Manual transactions auto-dedup when you import a matching statement. Delete with ✕ if no longer needed.
           </p>
         </div>
@@ -579,13 +579,13 @@ export default function TransactionTable({
                 const isSuccess = splitSuccess === tx.id
                 return (
                   <>
-                    <tr key={tx.id} className={`border-b hover:bg-gray-50 ${tx.is_manual ? 'bg-indigo-50/30' : ''}`}>
+                    <tr key={tx.id} className={`border-b hover:bg-gray-50 ${tx.is_manual ? 'bg-green-50/30' : ''}`}>
                       <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">
                         {new Date(tx.date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                       </td>
                       <td className="px-4 py-2.5 text-gray-800 max-w-0 truncate">
                         {tx.is_manual && (
-                          <span className="mr-1.5 text-xs text-indigo-400 font-medium" title="Manually entered">✎</span>
+                          <span className="mr-1.5 text-xs text-green-500 font-medium" title="Manually entered">✎</span>
                         )}
                         {tx.description}
                       </td>
@@ -595,7 +595,7 @@ export default function TransactionTable({
                             <span className={`text-xs font-semibold ${negative ? 'text-red-400' : 'text-green-400'}`}>{negative ? '−' : '+'}</span>
                             <input
                               autoFocus
-                              className="w-20 text-sm text-right border border-indigo-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                              className="w-20 text-sm text-right border border-green-400 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-green-500"
                               value={editingAmountVal}
                               onChange={(e) => setEditingAmountVal(e.target.value.replace(/[^0-9.]/g, ''))}
                               onKeyDown={(e) => {
@@ -623,7 +623,7 @@ export default function TransactionTable({
                         <select
                           value={tx.category_id ?? ''}
                           onChange={(e) => onSetCategory(tx.id, e.target.value)}
-                          className="w-full text-xs border-0 bg-transparent text-gray-700 focus:ring-1 focus:ring-indigo-500 rounded px-1 py-0.5 cursor-pointer hover:bg-gray-100"
+                          className="w-full text-xs border-0 bg-transparent text-gray-700 focus:ring-1 focus:ring-green-600 rounded px-1 py-0.5 cursor-pointer hover:bg-gray-100"
                         >
                           <option value="">— uncategorized —</option>
                           {BUCKET_ORDER.filter((b) => groups[b]).map((bucket) => (
@@ -641,7 +641,7 @@ export default function TransactionTable({
                       <td className="px-2 py-2.5">
                         <button
                           onClick={() => isSplitOpen ? setSplitOpen(null) : openSplit(tx.id)}
-                          className={`text-sm transition-colors ${isSplitOpen ? 'text-indigo-500' : 'text-gray-300 hover:text-indigo-500'}`}
+                          className={`text-sm transition-colors ${isSplitOpen ? 'text-green-600' : 'text-gray-300 hover:text-green-600'}`}
                           title="Split this transaction"
                         >
                           ↔
@@ -658,7 +658,7 @@ export default function TransactionTable({
                       </td>
                     </tr>
                     {isSplitOpen && (
-                      <tr key={`split-${tx.id}`} className="bg-indigo-50 border-b">
+                      <tr key={`split-${tx.id}`} className="bg-green-50 border-b">
                         <td colSpan={7} className="px-4 py-2">
                           {isSuccess ? (
                             <span className="text-sm text-green-600 font-medium">Split recorded!</span>
@@ -667,13 +667,13 @@ export default function TransactionTable({
                               <span className="text-xs text-gray-500 shrink-0">↔ Who owes you?</span>
                               <input
                                 autoFocus
-                                className="border rounded px-2 py-1 text-sm w-36 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                className="border rounded px-2 py-1 text-sm w-36 focus:outline-none focus:ring-2 focus:ring-green-500"
                                 placeholder="Name"
                                 value={splitOwedBy}
                                 onChange={(e) => setSplitOwedBy(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && handleSubmitSplit(tx)}
                               />
-                              <div className="flex items-center border rounded overflow-hidden focus-within:ring-2 focus-within:ring-indigo-400">
+                              <div className="flex items-center border rounded overflow-hidden focus-within:ring-2 focus-within:ring-green-500">
                                 <span className="px-1.5 text-xs text-gray-400 bg-gray-50 border-r">$</span>
                                 <input
                                   className="px-2 py-1 text-sm w-24 focus:outline-none"
@@ -686,7 +686,7 @@ export default function TransactionTable({
                               <button
                                 onClick={() => handleSubmitSplit(tx)}
                                 disabled={splitSaving || !splitOwedBy.trim() || !splitAmount}
-                                className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+                                className="text-xs px-3 py-1.5 bg-green-700 text-white rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
                               >
                                 {splitSaving ? '…' : 'Split'}
                               </button>

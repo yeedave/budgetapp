@@ -131,7 +131,7 @@ export default function Calculator() {
           <div className="flex items-center gap-1.5">
             <span className="text-xs text-gray-400">Avg over</span>
             <select
-              className="border rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="border rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-green-500"
               value={months}
               onChange={(e) => setMonths(e.target.value)}
             >
@@ -160,7 +160,7 @@ export default function Calculator() {
               <Row
                 label="Monthly Surplus"
                 value={s.monthly_surplus}
-                color={s.monthly_surplus >= 0 ? 'text-indigo-600 font-bold' : 'text-red-600 font-bold'}
+                color={s.monthly_surplus >= 0 ? 'text-green-700 font-bold' : 'text-red-600 font-bold'}
               />
             </div>
             <div className="flex justify-between pt-2 text-xs text-gray-400">
@@ -182,7 +182,7 @@ export default function Calculator() {
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-400">What is it? (optional)</label>
             <input
-              className="border rounded px-2 py-1.5 text-sm w-44 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              className="border rounded px-2 py-1.5 text-sm w-44 focus:outline-none focus:ring-2 focus:ring-green-500"
               placeholder="e.g. New laptop"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
@@ -190,7 +190,7 @@ export default function Calculator() {
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-400">Amount</label>
-            <div className="flex items-center border rounded overflow-hidden focus-within:ring-2 focus-within:ring-indigo-400">
+            <div className="flex items-center border rounded overflow-hidden focus-within:ring-2 focus-within:ring-green-500">
               <span className="px-2 py-1.5 text-sm text-gray-400 bg-gray-50 border-r">$</span>
               <input
                 className="px-2 py-1.5 text-sm w-28 focus:outline-none"
@@ -209,7 +209,7 @@ export default function Calculator() {
                   onClick={() => setExpenseType(t)}
                   className={`px-3 py-1.5 transition-colors capitalize ${
                     expenseType === t
-                      ? 'bg-indigo-600 text-white'
+                      ? 'bg-green-700 text-white'
                       : 'bg-white text-gray-500 hover:bg-gray-50'
                   }`}
                 >
@@ -273,7 +273,7 @@ export default function Calculator() {
                   </div>
                   <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
                     <div
-                      className={`h-full rounded-full ${overBudget ? 'bg-red-400' : 'bg-indigo-400'}`}
+                      className={`h-full rounded-full ${overBudget ? 'bg-red-400' : 'bg-green-500'}`}
                       style={{ width: `${pct}%` }}
                     />
                   </div>

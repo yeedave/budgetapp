@@ -64,7 +64,7 @@ function TxDrillDown({
           <select
             value={tx.category_id ?? ''}
             onChange={(e) => onSetCategory(tx.id, e.target.value)}
-            className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 w-40 shrink-0"
+            className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-green-500 w-40 shrink-0"
           >
             <option value="">— uncategorized —</option>
             {BUCKET_ORDER.map((bucket) => {

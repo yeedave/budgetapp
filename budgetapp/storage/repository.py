@@ -388,8 +388,8 @@ class Repository:
 
     def find_duplicate_transactions(self) -> list[dict]:
         rows = self.conn.execute(
-            """SELECT t.id, t.date, t.description, CAST(t.amount AS TEXT) AS amount,
-                      t.account_id, t.category_id, t.imported_at
+            """SELECT t.rowid, t.id, t.date, t.description, t.amount,
+                      t.account_id, t.category_id
                FROM transactions t
                INNER JOIN (
                    SELECT date, description, amount
@@ -397,9 +397,8 @@ class Repository:
                    GROUP BY date, description, amount
                    HAVING COUNT(*) > 1
                ) dup USING (date, description, amount)
-               ORDER BY t.date, t.description, t.amount, t.imported_at"""
+               ORDER BY t.date, t.description, t.amount, t.rowid"""
         ).fetchall()
-        # Group into lists sharing (date, description, amount)
         from collections import defaultdict
         groups: dict[tuple, list[dict]] = defaultdict(list)
         for r in rows:

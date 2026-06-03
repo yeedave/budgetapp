@@ -12,7 +12,7 @@ DB_PATH = PROJECT_ROOT / "data" / "budgetapp.db"
 # Built React frontend (served by pywebview in production)
 FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
 
-APP_NAME = "BudgetApp"
+APP_NAME = "Jade Banking"
 APP_WIDTH = 1400
 APP_HEIGHT = 900
 

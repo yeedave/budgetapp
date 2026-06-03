@@ -79,7 +79,7 @@ export default function SplitsManager() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-medium text-sm text-gray-800">{split.owed_by}</span>
-                    <span className="text-sm font-semibold text-indigo-700 tabular-nums">
+                    <span className="text-sm font-semibold text-green-800 tabular-nums">
                       {fmt.format(parseFloat(split.amount_owed))}
                     </span>
                   </div>
@@ -99,7 +99,7 @@ export default function SplitsManager() {
                   <button
                     onClick={() => handleSettle(split.id)}
                     disabled={actionId === split.id}
-                    className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+                    className="text-xs px-3 py-1.5 bg-green-700 text-white rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
                   >
                     {actionId === split.id ? '…' : 'Settled'}
                   </button>

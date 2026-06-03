@@ -104,7 +104,7 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
         <h2 className="text-base font-semibold text-gray-800 w-44 text-center">{monthLabel}</h2>
         <button onClick={nextMonth} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors text-base leading-none">›</button>
         {todayDay === null && (
-          <button onClick={goToday} className="ml-2 text-xs text-indigo-600 hover:underline">Today</button>
+          <button onClick={goToday} className="ml-2 text-xs text-green-700 hover:underline">Today</button>
         )}
         {loading && <span className="ml-3 text-xs text-gray-400">Loading…</span>}
       </div>
@@ -134,15 +134,15 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
               onClick={() => setSelectedDay(isSelected ? null : day)}
               className={`h-20 p-1.5 text-left flex flex-col transition-colors ${
                 isSelected
-                  ? 'bg-indigo-50 ring-2 ring-inset ring-indigo-400'
+                  ? 'bg-green-50 ring-2 ring-inset ring-green-500'
                   : isToday
-                  ? 'bg-indigo-50 hover:bg-indigo-100'
+                  ? 'bg-green-50 hover:bg-green-100'
                   : isPast
                   ? 'bg-white hover:bg-gray-50'
                   : 'bg-gray-50/50 hover:bg-gray-50'
               }`}
             >
-              <span className={`text-xs font-semibold leading-none ${isToday ? 'text-indigo-600' : 'text-gray-500'}`}>
+              <span className={`text-xs font-semibold leading-none ${isToday ? 'text-green-700' : 'text-gray-500'}`}>
                 {day}
               </span>
               <div className="flex-1 mt-1 overflow-hidden space-y-0.5">
@@ -211,7 +211,7 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
                           <select
                             value={tx.category_id ?? ''}
                             onChange={(e) => handleSetCategory(tx.id, e.target.value)}
-                            className="w-full text-xs border-0 bg-transparent text-gray-700 focus:ring-1 focus:ring-indigo-500 rounded px-1 py-0.5 cursor-pointer hover:bg-gray-100 select-auto"
+                            className="w-full text-xs border-0 bg-transparent text-gray-700 focus:ring-1 focus:ring-green-600 rounded px-1 py-0.5 cursor-pointer hover:bg-gray-100 select-auto"
                           >
                             <option value="">— uncategorized —</option>
                             {BUCKET_ORDER.filter((b) => groups[b]?.length).map((bucket) => (

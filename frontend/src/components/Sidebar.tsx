@@ -33,7 +33,7 @@ export default function Sidebar({
           onClick={() => onAccountChange('')}
           className={`w-full text-left px-3 py-2 rounded text-sm mb-0.5 ${
             selectedAccount === ''
-              ? 'bg-indigo-50 text-indigo-700 font-medium'
+              ? 'bg-green-50 text-green-800 font-medium'
               : 'text-gray-700 hover:bg-gray-50'
           }`}
         >
@@ -45,7 +45,7 @@ export default function Sidebar({
             onClick={() => onAccountChange(a.id)}
             className={`w-full text-left px-3 py-2 rounded text-sm mb-0.5 flex items-center gap-2 ${
               selectedAccount === a.id
-                ? 'bg-indigo-50 text-indigo-700 font-medium'
+                ? 'bg-green-50 text-green-800 font-medium'
                 : 'text-gray-700 hover:bg-gray-50'
             }`}
           >
@@ -68,7 +68,7 @@ export default function Sidebar({
               onClick={() => onMonthChange('')}
               className={`w-full text-left px-3 py-2 rounded text-sm mb-0.5 ${
                 selectedMonth === ''
-                  ? 'bg-indigo-50 text-indigo-700 font-medium'
+                  ? 'bg-green-50 text-green-800 font-medium'
                   : 'text-gray-700 hover:bg-gray-50'
               }`}
             >
@@ -80,7 +80,7 @@ export default function Sidebar({
                 onClick={() => onMonthChange(m)}
                 className={`w-full text-left px-3 py-2 rounded text-sm mb-0.5 ${
                   selectedMonth === m
-                    ? 'bg-indigo-50 text-indigo-700 font-medium'
+                    ? 'bg-green-50 text-green-800 font-medium'
                     : 'text-gray-700 hover:bg-gray-50'
                 }`}
               >

@@ -109,12 +109,12 @@ export default function SettingsManager() {
         <p className="text-sm text-gray-500 mb-4">
           Used for the AI Advisor chat and optional auto-categorization of imported transactions.
           Get a key at{' '}
-          <span className="text-indigo-600 font-medium">console.anthropic.com</span>.
+          <span className="text-green-700 font-medium">console.anthropic.com</span>.
         </p>
 
         <label className="block text-xs font-medium text-gray-500 mb-1.5">Anthropic API Key</label>
         <div className="flex gap-2">
-          <div className="flex-1 flex items-center border border-gray-200 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-indigo-400 bg-white">
+          <div className="flex-1 flex items-center border border-gray-200 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-green-500 bg-white">
             <input
               type={showKey ? 'text' : 'password'}
               className="flex-1 px-3 py-2 text-sm focus:outline-none font-mono"
@@ -135,7 +135,7 @@ export default function SettingsManager() {
           <button
             onClick={handleSaveKey}
             disabled={keySaving}
-            className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors shrink-0"
+            className="px-4 py-2 bg-green-700 text-white text-sm rounded-lg hover:bg-green-800 disabled:opacity-40 transition-colors shrink-0"
           >
             {keySaving ? 'Saving…' : 'Save'}
           </button>
@@ -152,7 +152,7 @@ export default function SettingsManager() {
         <label className="block text-xs font-medium text-gray-500 mt-5 mb-1.5">Model</label>
         <div className="flex gap-2">
           <select
-            className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+            className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
             value={model}
             onChange={(e) => setModel(e.target.value)}
           >
@@ -163,7 +163,7 @@ export default function SettingsManager() {
           <button
             onClick={handleSaveModel}
             disabled={modelSaving}
-            className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors shrink-0"
+            className="px-4 py-2 bg-green-700 text-white text-sm rounded-lg hover:bg-green-800 disabled:opacity-40 transition-colors shrink-0"
           >
             {modelSaving ? 'Saving…' : 'Save'}
           </button>
@@ -193,7 +193,7 @@ export default function SettingsManager() {
         <button
           onClick={handleExport}
           disabled={busy}
-          className="px-4 py-2 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+          className="px-4 py-2 bg-green-700 text-white text-sm rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
         >
           Export backup…
         </button>

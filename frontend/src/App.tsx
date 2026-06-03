@@ -69,7 +69,7 @@ function MoreMenu({ views, activeView, labels, onSelect }: {
         onClick={() => setOpen((v) => !v)}
         className={`px-3 py-3 text-sm border-b-2 transition-colors flex items-center gap-1 ${
           hasActive
-            ? 'border-indigo-600 text-indigo-600 font-medium'
+            ? 'border-green-700 text-green-700 font-medium'
             : 'border-transparent text-gray-500 hover:text-gray-700'
         }`}
       >
@@ -83,7 +83,7 @@ function MoreMenu({ views, activeView, labels, onSelect }: {
               onClick={() => { onSelect(v); setOpen(false) }}
               className={`w-full text-left px-4 py-2 text-sm transition-colors ${
                 activeView === v
-                  ? 'text-indigo-600 font-medium bg-indigo-50'
+                  ? 'text-green-700 font-medium bg-green-50'
                   : 'text-gray-700 hover:bg-gray-50'
               }`}
             >
@@ -178,7 +178,10 @@ export default function App() {
     <div className="flex flex-col h-screen bg-gray-50 text-gray-900">
       {/* Header */}
       <header className="shrink-0 bg-white border-b px-5 py-0 flex items-center gap-1 shadow-sm">
-        <span className="font-semibold text-gray-900 mr-4 py-3">BudgetApp</span>
+        <div className="flex items-center gap-2 mr-5 py-2 shrink-0">
+          <img src="/jade-banking-logo.svg" alt="Jade Banking" className="h-7 w-7 object-contain" />
+          <span className="font-semibold text-gray-800 tracking-tight text-sm">Jade Banking</span>
+        </div>
 
         {/* Primary tabs */}
         {PRIMARY_VIEWS.map((v) => (
@@ -187,7 +190,7 @@ export default function App() {
             onClick={() => handleViewChange(v)}
             className={`px-3 py-3 text-sm border-b-2 transition-colors whitespace-nowrap ${
               view === v
-                ? 'border-indigo-600 text-indigo-600 font-medium'
+                ? 'border-green-700 text-green-700 font-medium'
                 : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >

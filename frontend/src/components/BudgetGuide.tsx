@@ -48,7 +48,7 @@ function CategorySelect({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-400 w-44"
+      className="text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-green-500 w-44"
     >
       <option value="">— pick category —</option>
       {ordered.map((bucket) => {
@@ -162,7 +162,7 @@ export default function BudgetGuide({ categories, onSetCategory }: Props) {
         </div>
         <div className="w-full bg-gray-100 rounded-full h-2">
           <div
-            className="bg-indigo-500 h-2 rounded-full transition-all duration-500"
+            className="bg-green-600 h-2 rounded-full transition-all duration-500"
             style={{ width: `${pct}%` }}
           />
         </div>
@@ -198,7 +198,7 @@ export default function BudgetGuide({ categories, onSetCategory }: Props) {
                       <span className="ml-2 text-xs text-gray-400">{info.examples}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs bg-indigo-100 text-indigo-700 rounded-full px-2 py-0.5">{items.length}</span>
+                      <span className="text-xs bg-green-100 text-green-800 rounded-full px-2 py-0.5">{items.length}</span>
                       <span className="text-gray-400 text-xs">{open ? '▲' : '▼'}</span>
                     </div>
                   </button>
@@ -233,7 +233,7 @@ export default function BudgetGuide({ categories, onSetCategory }: Props) {
                                 <button
                                   onClick={() => handleApply(item)}
                                   disabled={!selections[item.description] || applying.has(item.description)}
-                                  className="text-xs px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+                                  className="text-xs px-3 py-1 bg-green-700 text-white rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
                                 >
                                   {applying.has(item.description) ? '…' : 'Apply'}
                                 </button>
@@ -304,14 +304,14 @@ export default function BudgetGuide({ categories, onSetCategory }: Props) {
                                 placeholder={cat.avg_monthly > 0 ? String(Math.ceil(cat.avg_monthly / 10) * 10) : '0'}
                                 value={budgetEdits[cat.id] ?? ''}
                                 onChange={(e) => setBudgetEdits((prev) => ({ ...prev, [cat.id]: e.target.value }))}
-                                className="w-28 text-right text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                className="w-28 text-right text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-green-500"
                               />
                             </td>
                             <td className="px-4 py-2 text-right">
                               <button
                                 onClick={() => handleSaveBudget(cat.id)}
                                 disabled={saved || !isDirty || !budgetEdits[cat.id]}
-                                className="text-xs px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+                                className="text-xs px-3 py-1 bg-green-700 text-white rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
                               >
                                 {saved ? '…' : 'Save'}
                               </button>

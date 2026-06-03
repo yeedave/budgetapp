@@ -75,7 +75,7 @@ function PlanCard({ label, result, highlight, tooltip }: {
   tooltip?: string
 }) {
   return (
-    <div className={`flex-1 rounded-lg border p-5 ${highlight ? 'border-indigo-300 bg-indigo-50' : 'border-gray-200 bg-white'}`}>
+    <div className={`flex-1 rounded-lg border p-5 ${highlight ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white'}`}>
       <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">
         {label}
         {tooltip && <HelpTooltip text={tooltip} />}
@@ -285,7 +285,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
                 {row.balance ? fmt.format(parseFloat(row.balance)) : '—'}
               </div>
               <select
-                className="flex-1 border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                className="flex-1 border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                 value={row.category_id ?? ''}
                 onChange={(e) => handleDebtCategoryLink(row.id, e.target.value)}
               >
@@ -310,7 +310,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
             </div>
             <button
               onClick={handleAddSavings}
-              className="text-xs px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors"
+              className="text-xs px-2 py-1 bg-green-700 text-white rounded hover:bg-green-800 transition-colors"
             >
               + Add
             </button>
@@ -337,12 +337,12 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
                 {/* Row 1: name, balance, goal, category link */}
                 <div className="flex items-center gap-2 flex-wrap">
                   <input
-                    className="w-32 border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 shrink-0"
+                    className="w-32 border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 shrink-0"
                     value={name}
                     placeholder="Name"
                     onChange={(e) => handleSavingsEdit(tracker.id, 'name', e.target.value)}
                   />
-                  <div className="flex items-center border rounded overflow-hidden shrink-0 focus-within:ring-2 focus-within:ring-indigo-400" title="Current balance">
+                  <div className="flex items-center border rounded overflow-hidden shrink-0 focus-within:ring-2 focus-within:ring-green-500" title="Current balance">
                     <span className="px-1.5 text-xs text-gray-400 bg-gray-50 border-r">$</span>
                     <input
                       className="w-20 px-2 py-1 text-sm text-right focus:outline-none"
@@ -351,7 +351,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
                       onChange={(e) => handleSavingsEdit(tracker.id, 'balance', e.target.value)}
                     />
                   </div>
-                  <div className="flex items-center border rounded overflow-hidden shrink-0 focus-within:ring-2 focus-within:ring-indigo-400" title="Goal amount">
+                  <div className="flex items-center border rounded overflow-hidden shrink-0 focus-within:ring-2 focus-within:ring-green-500" title="Goal amount">
                     <span className="px-1.5 text-xs text-gray-400 bg-gray-50 border-r whitespace-nowrap">Goal $</span>
                     <input
                       className="w-20 px-2 py-1 text-sm text-right focus:outline-none"
@@ -360,7 +360,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
                       onChange={(e) => handleSavingsEdit(tracker.id, 'goal_amount', e.target.value)}
                     />
                   </div>
-                  <div className="flex items-center border rounded overflow-hidden shrink-0 focus-within:ring-2 focus-within:ring-indigo-400" title="Monthly contribution">
+                  <div className="flex items-center border rounded overflow-hidden shrink-0 focus-within:ring-2 focus-within:ring-green-500" title="Monthly contribution">
                     <span className="px-1.5 text-xs text-gray-400 bg-gray-50 border-r whitespace-nowrap">+$/mo</span>
                     <input
                       className="w-20 px-2 py-1 text-sm text-right focus:outline-none"
@@ -370,7 +370,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
                     />
                   </div>
                   <select
-                    className="flex-1 border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 min-w-[120px]"
+                    className="flex-1 border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 min-w-[120px]"
                     value={catId ?? ''}
                     onChange={(e) => handleSavingsEdit(tracker.id, 'category_id', e.target.value)}
                   >
@@ -382,7 +382,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
                   {isDirty && (
                     <button
                       onClick={() => handleSaveSavings(tracker)}
-                      className="text-xs px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors shrink-0"
+                      className="text-xs px-2 py-1 bg-green-700 text-white rounded hover:bg-green-800 transition-colors shrink-0"
                     >
                       Save
                     </button>
@@ -400,7 +400,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
                   <div className="flex items-center gap-3">
                     <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
                       <div
-                        className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-green-500' : 'bg-indigo-400'}`}
+                        className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-green-500' : 'bg-green-500'}`}
                         style={{ width: `${pct}%` }}
                       />
                     </div>
@@ -408,7 +408,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
                       {fmt.format(balNum)} / {fmt.format(goalNum)}
                     </span>
                     {monthsLeft !== null && (
-                      <span className="text-xs text-indigo-500 shrink-0 w-28">
+                      <span className="text-xs text-green-600 shrink-0 w-28">
                         ~{monthsLeft} mo to goal
                       </span>
                     )}
@@ -445,7 +445,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
               </div>
               <div className="text-right">
                 <div className="text-xs text-gray-400 uppercase tracking-wider">Total Saved</div>
-                <div className="text-lg font-semibold text-indigo-600">
+                <div className="text-lg font-semibold text-green-700">
                   {fmt.format(savings.reduce((sum, s) => sum + parseFloat(s.balance || '0'), 0))}
                 </div>
               </div>
@@ -466,7 +466,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
               </BarChart>
             </ResponsiveContainer>
             <div className="flex items-center gap-4 mt-1 text-xs text-gray-400">
-              <span className="flex items-center gap-1"><span className="inline-block w-3 h-2 rounded-sm bg-indigo-500" /> Saved</span>
+              <span className="flex items-center gap-1"><span className="inline-block w-3 h-2 rounded-sm bg-green-600" /> Saved</span>
               <span className="flex items-center gap-1"><span className="inline-block w-3 h-2 rounded-sm bg-gray-200" /> Remaining to Goal</span>
             </div>
           </div>
@@ -482,7 +482,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
           </div>
           <button
             onClick={handleAdd}
-            className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors"
+            className="text-xs px-3 py-1.5 bg-green-700 text-white rounded hover:bg-green-800 transition-colors"
           >
             + Add Debt
           </button>
@@ -504,7 +504,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
               <tr key={row.id} className="group">
                 <td className="px-3 py-2">
                   <input
-                    className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                     value={row.name}
                     placeholder="e.g. Chase Sapphire"
                     onChange={(e) => updateRow(row.id, 'name', e.target.value)}
@@ -512,7 +512,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
                 </td>
                 <td className="px-3 py-2">
                   <input
-                    className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                     value={row.balance}
                     placeholder="e.g. 8500.00"
                     onChange={(e) => updateRow(row.id, 'balance', e.target.value)}
@@ -520,7 +520,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
                 </td>
                 <td className="px-3 py-2">
                   <input
-                    className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                     value={row.apr}
                     placeholder="e.g. 26.74"
                     onChange={(e) => updateRow(row.id, 'apr', e.target.value)}
@@ -528,7 +528,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
                 </td>
                 <td className="px-3 py-2">
                   <input
-                    className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                     value={row.minimum}
                     placeholder="e.g. 200.00"
                     onChange={(e) => updateRow(row.id, 'minimum', e.target.value)}
@@ -536,7 +536,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
                 </td>
                 <td className="px-3 py-2 w-20">
                   <input
-                    className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    className="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                     value={row.months_remaining}
                     placeholder="—"
                     inputMode="numeric"
@@ -549,7 +549,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
                       <button
                         onClick={() => handleSave(row.id)}
                         disabled={!row.name.trim() || row.saving}
-                        className="text-xs px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+                        className="text-xs px-2 py-1 bg-green-700 text-white rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
                       >
                         {row.saving ? '…' : 'Save'}
                       </button>
@@ -586,7 +586,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
         <div className="px-5 py-4 space-y-4">
           <div className="flex items-center gap-3">
             <label className="text-sm text-gray-600 shrink-0">Extra monthly budget</label>
-            <div className="flex items-center border rounded overflow-hidden focus-within:ring-2 focus-within:ring-indigo-400">
+            <div className="flex items-center border rounded overflow-hidden focus-within:ring-2 focus-within:ring-green-500">
               <span className="px-2 py-1.5 text-sm text-gray-400 bg-gray-50 border-r">$</span>
               <input
                 className="px-2 py-1.5 text-sm w-28 focus:outline-none"
@@ -598,7 +598,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
             <button
               onClick={handleRunPlan}
               disabled={planLoading}
-              className="text-sm px-4 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+              className="text-sm px-4 py-1.5 bg-green-700 text-white rounded hover:bg-green-800 disabled:opacity-50 transition-colors"
             >
               {planLoading ? 'Calculating…' : 'Run Plan'}
             </button>
@@ -659,7 +659,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
                 <div className="text-sm text-gray-600 bg-gray-50 rounded px-4 py-3">
                   {interestSavings > 0.005 ? (
                     <>
-                      <span className="font-semibold text-indigo-700">Avalanche</span> saves{' '}
+                      <span className="font-semibold text-green-800">Avalanche</span> saves{' '}
                       <span className="font-semibold">{fmt.format(interestSavings)}</span> in interest
                       {timeDiff && timeDiff > 0 && (
                         <> and pays off {timeDiff} month{timeDiff !== 1 ? 's' : ''} sooner than Snowball</>
