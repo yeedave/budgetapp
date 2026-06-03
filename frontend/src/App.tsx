@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { Account, Category, Transaction, ImportResult } from './types'
-import { getAccounts, getCategories, getTransactions, setCategory, addTransaction, deleteTransaction } from './api'
+import { getAccounts, getCategories, getTransactions, setCategory, addTransaction, updateTransactionAmount, deleteTransaction } from './api'
 import Sidebar from './components/Sidebar'
 import TransactionTable from './components/TransactionTable'
 import ImportBar from './components/ImportBar'
@@ -13,8 +13,10 @@ import ProgressTab from './components/ProgressTab'
 import Calculator from './components/Calculator'
 import SplitsManager from './components/SplitsManager'
 import BudgetGuide from './components/BudgetGuide'
+import Advisor from './components/Advisor'
+import PaymentCalendar from './components/PaymentCalendar'
 
-type View = 'dashboard' | 'transactions' | 'debts' | 'categories' | 'accounts' | 'calculator' | 'progress' | 'splits' | 'guide' | 'settings'
+type View = 'dashboard' | 'transactions' | 'debts' | 'categories' | 'accounts' | 'calculator' | 'progress' | 'splits' | 'guide' | 'advisor' | 'calendar' | 'settings'
 
 function usePywebviewReady() {
   const [ready, setReady] = useState(!!window.pywebview?.api)
@@ -27,14 +29,15 @@ function usePywebviewReady() {
   return ready
 }
 
-const VALID_VIEWS: View[] = ['dashboard', 'transactions', 'debts', 'categories', 'accounts', 'calculator', 'progress', 'splits', 'guide', 'settings']
+const VALID_VIEWS: View[] = ['dashboard', 'transactions', 'debts', 'categories', 'accounts', 'calculator', 'progress', 'splits', 'guide', 'advisor', 'calendar', 'settings']
 
 const PRIMARY_VIEWS: View[] = ['dashboard', 'transactions', 'debts', 'categories', 'accounts', 'progress']
-const MORE_VIEWS: View[] = ['calculator', 'splits', 'guide', 'settings']
+const MORE_VIEWS: View[] = ['advisor', 'calendar', 'calculator', 'splits', 'guide', 'settings']
 const VIEW_LABEL: Record<View, string> = {
   dashboard: 'Dashboard', transactions: 'Transactions', debts: 'Debts',
   categories: 'Categories', accounts: 'Accounts', progress: 'Progress',
-  calculator: 'Calculator', splits: 'Splits', guide: 'Guide', settings: 'Settings',
+  calculator: 'Calculator', splits: 'Splits', guide: 'Guide', advisor: 'AI Advisor',
+  calendar: 'Calendar', settings: 'Settings',
 }
 
 function persist(key: string, value: string) {
@@ -158,6 +161,11 @@ export default function App() {
     setAllTransactions((prev) => prev.filter((t) => t.id !== txId))
   }
 
+  const handleUpdateTransactionAmount = async (txId: string, amount: string) => {
+    await updateTransactionAmount(txId, amount)
+    setAllTransactions((prev) => prev.map((t) => t.id === txId ? { ...t, amount } : t))
+  }
+
   if (!ready) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-50">
@@ -211,7 +219,11 @@ export default function App() {
         />
         <main className="flex-1 overflow-auto">
           {view === 'dashboard' && (
-            <Dashboard transactions={displayedTransactions} categories={categories} />
+            <Dashboard
+              transactions={displayedTransactions}
+              categories={categories}
+              onSetCategory={handleSetCategory}
+            />
           )}
           {view === 'transactions' && (
             <TransactionTable
@@ -220,6 +232,7 @@ export default function App() {
               accounts={accounts}
               onSetCategory={handleSetCategory}
               onAddTransaction={handleAddTransaction}
+              onUpdateAmount={handleUpdateTransactionAmount}
               onDeleteTransaction={handleDeleteTransaction}
               onBulkDeleted={(start, end, accountId) => {
                 setAllTransactions((prev) => prev.filter((t) => {
@@ -249,6 +262,8 @@ export default function App() {
           {view === 'guide' && (
             <BudgetGuide categories={categories} onSetCategory={handleSetCategory} />
           )}
+          {view === 'advisor' && <Advisor />}
+          {view === 'calendar' && <PaymentCalendar categories={categories} onSetCategory={handleSetCategory} />}
           {view === 'settings' && <SettingsManager />}
         </main>
       </div>

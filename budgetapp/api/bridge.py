@@ -38,6 +38,10 @@ class Api:
         self._window = None  # injected after webview.create_window
         self._pending_df: "pd.DataFrame | None" = None
         self._pending_path: str = ""
+        # Load saved API key into env so categorizer and advisor can use it
+        saved = self.get_settings()
+        if saved.get("anthropic_api_key") and not os.environ.get("ANTHROPIC_API_KEY"):
+            os.environ["ANTHROPIC_API_KEY"] = saved["anthropic_api_key"]
 
     def set_window(self, window) -> None:
         self._window = window
@@ -85,6 +89,15 @@ class Api:
         return _tx_dict({"id": tx.id, "date": tx.date, "description": tx.description,
                          "amount": tx.amount, "account_id": tx.account_id,
                          "category_id": tx.category_id, "is_manual": tx.is_manual})
+
+    def update_transaction_amount(self, tx_id: str, amount: str) -> dict:
+        try:
+            from decimal import Decimal, InvalidOperation
+            Decimal(amount)  # validate
+            self._repo.update_transaction_amount(tx_id, amount)
+            return {"ok": True}
+        except (InvalidOperation, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
 
     def delete_transaction(self, tx_id: str) -> dict:
         try:
@@ -505,6 +518,19 @@ class Api:
         current.update(updates)
         SETTINGS_FILE.write_text(json.dumps(current, indent=2))
 
+    def save_setting(self, key: str, value: str) -> dict:
+        try:
+            self._save_settings({key: value})
+            # Immediately apply recognised env-var settings
+            if key == "anthropic_api_key":
+                if value:
+                    os.environ["ANTHROPIC_API_KEY"] = value
+                else:
+                    os.environ.pop("ANTHROPIC_API_KEY", None)
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     # ------------------------------------------------------------------
     # Progress / XP
     # ------------------------------------------------------------------
@@ -641,6 +667,76 @@ class Api:
         return upcoming
 
     # ------------------------------------------------------------------
+    # Payment calendar
+    # ------------------------------------------------------------------
+
+    def get_calendar_data(self, year_month: str) -> dict:
+        import calendar as cal_mod
+        from datetime import date, timedelta
+
+        year, month = map(int, year_month.split("-"))
+        days_in_month = cal_mod.monthrange(year, month)[1]
+        month_start = date(year, month, 1)
+        month_end = date(year, month, days_in_month)
+
+        # Actual transactions for this month
+        txs = self._repo.get_transactions(month=year_month)
+        tx_list = [
+            _tx_dict({"id": t.id, "date": t.date, "description": t.description,
+                      "amount": t.amount, "account_id": t.account_id,
+                      "category_id": t.category_id, "is_manual": t.is_manual})
+            for t in txs
+        ]
+
+        scheduled = []
+
+        # Debt due dates
+        debts = self._repo.get_debts()
+        for d in debts:
+            due_day = d.get("due_day")
+            if not due_day:
+                continue
+            day = min(int(due_day), days_in_month)
+            scheduled.append({
+                "day": day,
+                "label": d["name"],
+                "amount": d.get("minimum"),
+                "source": "debt",
+            })
+
+        # Recurring projections
+        recurring = self._repo.detect_recurring()
+        for r in recurring:
+            try:
+                last = date.fromisoformat(r["last_date"])
+            except Exception:
+                continue
+            interval_days = max(1, int(r.get("avg_interval", 30)))
+
+            # Fast-forward to first occurrence on or after month_start
+            if last < month_start:
+                delta = (month_start - last).days
+                steps = delta // interval_days
+                proj = last + timedelta(days=steps * interval_days)
+                if proj < month_start:
+                    proj += timedelta(days=interval_days)
+            else:
+                proj = last
+
+            # Add all occurrences within this month
+            while proj <= month_end:
+                if proj >= month_start:
+                    scheduled.append({
+                        "day": proj.day,
+                        "label": r["description"],
+                        "amount": r["avg_amount"],
+                        "source": "recurring",
+                    })
+                proj += timedelta(days=interval_days)
+
+        return {"transactions": tx_list, "scheduled": scheduled}
+
+    # ------------------------------------------------------------------
     # Splits
     # ------------------------------------------------------------------
 
@@ -674,3 +770,293 @@ class Api:
         except (ValueError, TypeError):
             day = None
         self._repo.save_debt_due_day(debt_id, day)
+
+    # ------------------------------------------------------------------
+    # AI Financial Advisor
+    # ------------------------------------------------------------------
+
+    def chat_advisor(self, messages: list) -> dict:
+        """Send a chat message to Claude with full financial context in the system prompt."""
+        import os
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            return {"error": "ANTHROPIC_API_KEY is not set. Add it to your environment to use the AI Advisor."}
+
+        try:
+            import anthropic
+            from decimal import Decimal
+
+            # ── Gather financial data ────────────────────────────────
+            snapshot = self.get_budget_snapshot("3")
+            debts    = self._repo.get_debts()
+            cats     = self._repo.get_categories()
+            rules    = self._repo.get_rules()
+            trackers = self._repo.get_savings_trackers()
+            net_worth = self._repo.get_net_worth()
+
+            # ── Build system prompt ──────────────────────────────────
+            lines: list[str] = [
+                "You are a personal financial advisor integrated into the user's budget app.",
+                "You have access to their real financial data below. Be specific, reference actual",
+                "numbers, name categories and debts by their real names, and give actionable advice.",
+                "Be direct and honest — if they are overspending somewhere, say so clearly.",
+                "When asked about categories or rules, explain which transaction descriptions",
+                "trigger each rule. Keep responses concise but complete.",
+                "",
+                "## Monthly Averages (last 3 months)",
+                f"Income:              ${snapshot.get('monthly_income', 0):,.2f}",
+                f"Bills:               ${snapshot.get('monthly_bills', 0):,.2f}",
+                f"Subscriptions:       ${snapshot.get('monthly_subscriptions', 0):,.2f}",
+                f"Variable Expenses:   ${snapshot.get('monthly_variable', 0):,.2f}",
+                f"Debt Payments:       ${snapshot.get('monthly_debt_payments', 0):,.2f}",
+                f"Savings:             ${snapshot.get('monthly_savings_contributions', 0):,.2f}",
+                f"Surplus / Deficit:   ${snapshot.get('monthly_surplus', 0):+,.2f}",
+                f"Total Savings:       ${snapshot.get('total_savings', 0):,.2f}",
+                "",
+            ]
+
+            # Debts
+            if debts:
+                lines.append("## Debts")
+                for d in debts:
+                    parts = [f"- {d['name']}"]
+                    if d.get("balance"): parts.append(f"balance ${float(d['balance']):,.2f}")
+                    if d.get("apr"):     parts.append(f"{d['apr']}% APR")
+                    if d.get("minimum"): parts.append(f"${float(d['minimum']):,.2f}/mo minimum")
+                    lines.append("  ".join(parts))
+                lines.append("")
+
+            # Net worth
+            if net_worth:
+                assets   = net_worth.get("assets", [])
+                accounts = net_worth.get("accounts", [])
+                total_assets = sum(float(a.get("value", 0)) for a in assets)
+                total_acct   = sum(float(a.get("balance", 0)) for a in accounts if a.get("balance"))
+                lines.append("## Net Worth")
+                lines.append(f"Total (assets + account balances): ${total_assets + total_acct:,.2f}")
+                lines.append("")
+
+            # Category budgets vs actual
+            cat_rows = snapshot.get("categories", [])
+            if cat_rows:
+                lines.append("## Category Spending (avg/mo)")
+                for c in cat_rows:
+                    avg = abs(c.get("monthly_avg", 0))
+                    budget = c.get("budget")
+                    entry = f"- [{c['bucket']}] {c['name']}: ${avg:,.2f}/mo"
+                    if budget:
+                        status = "OVER" if avg > budget else "ok"
+                        entry += f"  (budget ${budget:,.2f} — {status})"
+                    lines.append(entry)
+                lines.append("")
+
+            # Categorization rules
+            if rules:
+                lines.append("## Auto-Categorization Rules (pattern → category)")
+                cat_name_map = {c.id: c.name for c in cats}
+                for r in rules[:30]:  # cap to avoid huge prompts
+                    cat_label = cat_name_map.get(r["category_id"], r["category_id"])
+                    lines.append(f"- `{r['pattern']}` → {cat_label}")
+                lines.append("")
+
+            # Savings trackers
+            if trackers:
+                lines.append("## Savings Trackers")
+                for t in trackers:
+                    bal = float(t.get("balance") or 0)
+                    goal = t.get("goal_amount")
+                    entry = f"- {t['name']}: ${bal:,.2f}"
+                    if goal:
+                        entry += f" / ${float(goal):,.2f} goal"
+                    lines.append(entry)
+
+            system_prompt = "\n".join(lines)
+
+            # ── Call Claude ──────────────────────────────────────────
+            model = self.get_settings().get("anthropic_model") or "claude-opus-4-7"
+            client = anthropic.Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model=model,
+                max_tokens=1024,
+                system=[{"type": "text", "text": system_prompt,
+                         "cache_control": {"type": "ephemeral"}}],
+                messages=messages,
+            )
+            return {"content": response.content[0].text}
+
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Rule generation from transactions
+    # ------------------------------------------------------------------
+
+    def generate_rules_from_transactions(self, month: str = "") -> dict:
+        import anthropic
+        import json as json_mod
+
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        if not api_key:
+            return {"error": "No Anthropic API key configured. Add it in Settings."}
+
+        try:
+            from datetime import date
+            cats = self._repo.get_categories()
+            rules = self._repo.get_rules()
+
+            if month == "ytd":
+                year_prefix = str(date.today().year)
+                all_txs = [
+                    t for t in self._repo.get_transactions()
+                    if str(t.date).startswith(year_prefix)
+                ]
+            else:
+                all_txs = self._repo.get_transactions(month=month or None)
+
+            uncategorized = [t for t in all_txs if not t.category_id]
+
+            cat_list = "\n".join(f"- {c.id}: {c.name} ({c.bucket})" for c in cats)
+            rule_list = "\n".join(
+                f"- pattern '{r['pattern']}' → {r['category_id']}" for r in rules[:60]
+            )
+            tx_lines = "\n".join(
+                f"- {t.description} | ${abs(float(t.amount)):.2f}"
+                for t in uncategorized[:100]
+            )
+
+            system = (
+                "You are a financial categorization assistant. Analyze the uncategorized "
+                "bank transactions and suggest rules to auto-categorize them.\n\n"
+                "Respond ONLY with valid JSON in this exact format (no markdown, no explanation):\n"
+                '{\n'
+                '  "new_categories": [\n'
+                '    {"name": "Category Name", "bucket": "expenses", "reason": "why"}\n'
+                '  ],\n'
+                '  "rules": [\n'
+                '    {"pattern": "KEYWORD", "category_ref": "existing_id_or_new_name", "example": "sample tx"}\n'
+                '  ]\n'
+                '}\n\n'
+                "Buckets: income, bills, subscriptions, expenses, savings, debts, transfers.\n"
+                "Rules use case-insensitive substring matching — use the most distinctive keyword.\n"
+                "Prefer existing category IDs. Only propose new categories when truly needed.\n"
+                "Skip transactions already covered by existing rules."
+            )
+
+            user_msg = (
+                f"Existing categories:\n{cat_list}\n\n"
+                f"Existing rules:\n{rule_list or '(none)'}\n\n"
+                f"Uncategorized transactions:\n{tx_lines or '(all transactions are already categorized)'}"
+            )
+
+            model = self.get_settings().get("anthropic_model") or "claude-opus-4-7"
+            client = anthropic.Anthropic(api_key=api_key)
+            resp = client.messages.create(
+                model=model,
+                max_tokens=2048,
+                system=system,
+                messages=[{"role": "user", "content": user_msg}],
+            )
+            text = resp.content[0].text.strip()
+
+            start, end = text.find('{'), text.rfind('}') + 1
+            if start == -1 or end == 0:
+                return {"error": "AI did not return valid JSON."}
+            data = json_mod.loads(text[start:end])
+
+            # Resolve each rule's category reference
+            cat_by_id = {c.id: c.name for c in cats}
+            cat_by_name_lower = {c.name.lower(): c.id for c in cats}
+            new_cat_names = {nc["name"].lower() for nc in data.get("new_categories", [])}
+
+            rules_out = []
+            for r in data.get("rules", []):
+                ref = (r.get("category_ref") or "").strip()
+                if ref in cat_by_id:
+                    rules_out.append({
+                        "pattern": r["pattern"], "category_id": ref,
+                        "category_name": cat_by_id[ref],
+                        "example": r.get("example", ""), "is_new_cat": False,
+                    })
+                elif ref.lower() in cat_by_name_lower:
+                    cid = cat_by_name_lower[ref.lower()]
+                    rules_out.append({
+                        "pattern": r["pattern"], "category_id": cid,
+                        "category_name": cat_by_id[cid],
+                        "example": r.get("example", ""), "is_new_cat": False,
+                    })
+                elif ref.lower() in new_cat_names:
+                    rules_out.append({
+                        "pattern": r["pattern"], "category_id": None,
+                        "category_name": ref,
+                        "example": r.get("example", ""), "is_new_cat": True,
+                    })
+
+            return {
+                "new_categories": data.get("new_categories", []),
+                "rules": rules_out,
+                "uncategorized_count": len(uncategorized),
+            }
+
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def apply_rule_suggestions(self, new_categories: list, rules: list) -> dict:
+        try:
+            # Create new categories first and build name → id map
+            name_to_id: dict[str, str] = {}
+            created_cats = 0
+            for cat in new_categories:
+                result = self.add_category(cat["name"], cat["bucket"], "")
+                name_to_id[cat["name"].lower()] = result["id"]
+                created_cats += 1
+
+            # Refresh category lookup after creation
+            all_cats = self._repo.get_categories()
+            cat_by_name: dict[str, str] = {c.name.lower(): c.id for c in all_cats}
+            cat_by_name.update(name_to_id)
+
+            created_rules = 0
+            for rule in rules:
+                cat_id = rule.get("category_id") or cat_by_name.get(
+                    (rule.get("category_name") or "").lower()
+                )
+                if not cat_id:
+                    continue
+                self.save_rule(rule["pattern"], cat_id)
+                created_rules += 1
+
+            return {"ok": True, "created_categories": created_cats, "created_rules": created_rules}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def export_rules_categories(self) -> dict:
+        import webview
+
+        cats = self._repo.get_categories()
+        rules = self._repo.get_rules()
+        data = {
+            "exported_at": datetime.now().isoformat(),
+            "categories": [
+                {"id": c.id, "name": c.name, "bucket": c.bucket, "owner": c.owner,
+                 "budget_amount": str(c.budget_amount) if c.budget_amount else None}
+                for c in cats
+            ],
+            "rules": rules,
+        }
+        fname = f"budgetapp_rules_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+
+        if self._window:
+            paths = self._window.create_file_dialog(
+                webview.SAVE_DIALOG,
+                save_filename=fname,
+                file_types=("JSON files (*.json)",),
+            )
+            if not paths:
+                return {"ok": False, "cancelled": True}
+            out_path = Path(paths if isinstance(paths, str) else paths[0])
+        else:
+            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+            out_path = BACKUP_DIR / fname
+
+        out_path.write_text(json.dumps(data, indent=2, default=str))
+        return {"ok": True, "path": str(out_path)}

@@ -121,6 +121,27 @@ export interface Rule {
   priority: number
 }
 
+export interface CategorySuggestion {
+  name: string
+  bucket: string
+  reason: string
+}
+
+export interface RuleSuggestion {
+  pattern: string
+  category_id: string | null
+  category_name: string
+  example: string
+  is_new_cat: boolean
+}
+
+export interface GenerateRulesResult {
+  new_categories?: CategorySuggestion[]
+  rules?: RuleSuggestion[]
+  uncategorized_count?: number
+  error?: string
+}
+
 export interface ProgressData {
   xp_total: number
   level: number
@@ -165,8 +186,32 @@ export interface RecurringItem {
   description: string
   occurrences: number
   avg_amount: number
+  avg_interval: number
+  interval_type: 'monthly' | 'weekly'
   last_date: string
   is_expense: boolean
+}
+
+export interface CalendarTx {
+  id: string
+  date: string
+  description: string
+  amount: string
+  category_id: string | null
+  account_id: string
+  is_manual: boolean
+}
+
+export interface ScheduledItem {
+  day: number
+  label: string
+  amount: string | number | null
+  source: 'debt' | 'recurring'
+}
+
+export interface CalendarData {
+  transactions: CalendarTx[]
+  scheduled: ScheduledItem[]
 }
 
 export interface Split {

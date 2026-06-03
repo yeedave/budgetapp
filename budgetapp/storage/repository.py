@@ -111,6 +111,13 @@ class Repository:
         rows = self.conn.execute(query, params).fetchall()
         return [self._row_to_transaction(r) for r in rows]
 
+    def update_transaction_amount(self, tx_id: str, amount: str) -> None:
+        self.conn.execute(
+            "UPDATE transactions SET amount = ? WHERE id = ? AND is_manual = 1",
+            (amount, tx_id),
+        )
+        self.conn.commit()
+
     def set_category(self, tx_id: str, category_id: str) -> list[str]:
         """Set category on one transaction, auto-apply rule to matching uncategorized ones.
         Returns list of all tx_ids updated."""
@@ -726,6 +733,8 @@ class Repository:
                 "description": entries[-1][2],
                 "occurrences": len(entries),
                 "avg_amount": round(avg_amount, 2),
+                "avg_interval": round(avg_interval, 0),
+                "interval_type": "weekly" if is_weekly else "monthly",
                 "last_date": dates[-1],
                 "is_expense": is_expense,
             })

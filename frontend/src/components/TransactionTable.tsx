@@ -13,6 +13,7 @@ interface Props {
   accounts: Account[]
   onSetCategory: (txId: string, categoryId: string) => void
   onAddTransaction: (date: string, description: string, amount: string, accountId: string, categoryId: string) => Promise<void>
+  onUpdateAmount: (txId: string, amount: string) => Promise<void>
   onDeleteTransaction: (txId: string) => Promise<void>
   onBulkDeleted: (startDate: string, endDate: string, accountId: string) => void
 }
@@ -62,13 +63,15 @@ function blankForm(accounts: Account[]): AddForm {
 
 export default function TransactionTable({
   transactions, categories, accounts,
-  onSetCategory, onAddTransaction, onDeleteTransaction, onBulkDeleted,
+  onSetCategory, onAddTransaction, onUpdateAmount, onDeleteTransaction, onBulkDeleted,
 }: Props) {
   const groups = groupByBucket(categories)
   const [sort, setSort] = useState<SortState>({ col: 'date', dir: 'desc' })
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState<AddForm>(() => blankForm(accounts))
   const [saving, setSaving] = useState(false)
+  const [editingAmountId, setEditingAmountId] = useState<string | null>(null)
+  const [editingAmountVal, setEditingAmountVal] = useState('')
   const [splitOpen, setSplitOpen] = useState<string | null>(null)
   const [splitOwedBy, setSplitOwedBy] = useState('')
   const [splitAmount, setSplitAmount] = useState('')
@@ -130,6 +133,14 @@ export default function TransactionTable({
     }
     return sort.dir === 'asc' ? cmp : -cmp
   })
+
+  async function handleSaveAmount(tx: Transaction) {
+    const raw = editingAmountVal.replace(/[^0-9.]/g, '')
+    if (!raw) { setEditingAmountId(null); return }
+    const signed = parseFloat(tx.amount) < 0 ? `-${raw}` : raw
+    await onUpdateAmount(tx.id, signed)
+    setEditingAmountId(null)
+  }
 
   async function handleSubmitAdd() {
     if (!form.description.trim() || !form.amount || !form.account_id) return
@@ -396,8 +407,35 @@ export default function TransactionTable({
                         )}
                         {tx.description}
                       </td>
-                      <td className={`px-4 py-2.5 text-right font-medium tabular-nums whitespace-nowrap ${negative ? 'text-red-600' : 'text-green-600'}`}>
-                        {negative ? `−${text.replace('-', '')}` : text}
+                      <td className="px-4 py-2.5 text-right">
+                        {tx.is_manual && editingAmountId === tx.id ? (
+                          <div className="flex items-center justify-end gap-1">
+                            <span className={`text-xs font-semibold ${negative ? 'text-red-400' : 'text-green-400'}`}>{negative ? '−' : '+'}</span>
+                            <input
+                              autoFocus
+                              className="w-20 text-sm text-right border border-indigo-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                              value={editingAmountVal}
+                              onChange={(e) => setEditingAmountVal(e.target.value.replace(/[^0-9.]/g, ''))}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveAmount(tx)
+                                if (e.key === 'Escape') setEditingAmountId(null)
+                              }}
+                              onBlur={() => handleSaveAmount(tx)}
+                            />
+                          </div>
+                        ) : (
+                          <span
+                            className={`font-medium tabular-nums whitespace-nowrap ${negative ? 'text-red-600' : 'text-green-600'} ${tx.is_manual ? 'cursor-pointer hover:underline' : ''}`}
+                            title={tx.is_manual ? 'Click to edit amount' : undefined}
+                            onClick={() => {
+                              if (!tx.is_manual) return
+                              setEditingAmountId(tx.id)
+                              setEditingAmountVal(Math.abs(parseFloat(tx.amount)).toFixed(2))
+                            }}
+                          >
+                            {negative ? `−${text.replace('-', '')}` : text}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-2.5">
                         <select

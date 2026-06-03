@@ -1,4 +1,4 @@
-import type { Account, Category, Transaction, ImportResult, DebtItem, DebtPlan, SavingsTracker, ProgressData, Rule, BudgetSnapshot, NetWorth, MonthlyTrends, RecurringItem, UpcomingBill, Split, ImportLogEntry, BudgetGuideData } from './types'
+import type { Account, Category, Transaction, ImportResult, DebtItem, DebtPlan, SavingsTracker, ProgressData, Rule, BudgetSnapshot, NetWorth, MonthlyTrends, RecurringItem, UpcomingBill, Split, ImportLogEntry, BudgetGuideData, CalendarData, GenerateRulesResult, CategorySuggestion, RuleSuggestion } from './types'
 
 // Extend Window with the pywebview API shape
 interface PywebviewApi {
@@ -12,6 +12,7 @@ interface PywebviewApi {
   confirm_import: (force_account_id: string) => Promise<ImportResult>
   set_category: (tx_id: string, category_id: string) => Promise<{ updated_ids: string[] }>
   add_transaction: (date: string, description: string, amount: string, account_id: string, category_id: string) => Promise<Transaction>
+  update_transaction_amount: (tx_id: string, amount: string) => Promise<{ ok: boolean; error?: string }>
   delete_transaction: (tx_id: string) => Promise<{ ok: boolean; error?: string }>
   count_transactions_range: (start_date: string, end_date: string, account_id: string) => Promise<number>
   delete_transactions_range: (start_date: string, end_date: string, account_id: string) => Promise<{ ok: boolean; deleted: number; error?: string }>
@@ -39,6 +40,7 @@ interface PywebviewApi {
   export_backup: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
   import_backup: () => Promise<{ ok: boolean; counts?: Record<string, number>; cancelled?: boolean; error?: string }>
   get_settings: () => Promise<Record<string, string>>
+  save_setting: (key: string, value: string) => Promise<{ ok: boolean; error?: string }>
   get_progress: () => Promise<ProgressData>
   set_prize_fund_pct: (pct: string) => Promise<void>
   get_net_worth: () => Promise<NetWorth>
@@ -56,6 +58,11 @@ interface PywebviewApi {
   get_budget_guide: () => Promise<BudgetGuideData>
   get_orphaned_account_ids: () => Promise<{ account_id: string; tx_count: number }[]>
   delete_transactions_for_account: (account_id: string) => Promise<{ ok: boolean; deleted: number }>
+  chat_advisor: (messages: { role: string; content: string }[]) => Promise<{ content?: string; error?: string }>
+  get_calendar_data: (year_month: string) => Promise<CalendarData>
+  generate_rules_from_transactions: (month?: string) => Promise<GenerateRulesResult>
+  apply_rule_suggestions: (new_categories: CategorySuggestion[], rules: RuleSuggestion[]) => Promise<{ ok: boolean; created_categories: number; created_rules: number; error?: string }>
+  export_rules_categories: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
 }
 
 declare global {
@@ -87,6 +94,7 @@ export const addTransaction = (
   accountId: string, categoryId: string,
 ) => api().add_transaction(date, description, amount, accountId, categoryId)
 
+export const updateTransactionAmount = (txId: string, amount: string) => api().update_transaction_amount(txId, amount)
 export const deleteTransaction = (txId: string) => api().delete_transaction(txId)
 export const countTransactionsRange = (startDate: string, endDate: string, accountId = '') =>
   api().count_transactions_range(startDate, endDate, accountId)
@@ -129,6 +137,7 @@ export const deleteRule = (ruleId: number) => api().delete_rule(ruleId)
 export const exportBackup = () => api().export_backup()
 export const importBackup = () => api().import_backup()
 export const getSettings = () => api().get_settings()
+export const saveSetting = (key: string, value: string) => api().save_setting(key, value)
 
 export const getProgress = () => api().get_progress()
 export const setPrizeFundPct = (pct: string) => api().set_prize_fund_pct(pct)
@@ -148,3 +157,8 @@ export const getImportLog = (accountId = '') => api().get_import_log(accountId)
 export const getBudgetGuide = () => api().get_budget_guide()
 export const getOrphanedAccountIds = () => api().get_orphaned_account_ids()
 export const deleteTransactionsForAccount = (accountId: string) => api().delete_transactions_for_account(accountId)
+export const chatAdvisor = (messages: { role: string; content: string }[]) => api().chat_advisor(messages)
+export const getCalendarData = (yearMonth: string) => api().get_calendar_data(yearMonth)
+export const generateRulesFromTransactions = (month = '') => api().generate_rules_from_transactions(month)
+export const applyRuleSuggestions = (newCategories: CategorySuggestion[], rules: RuleSuggestion[]) => api().apply_rule_suggestions(newCategories, rules)
+export const exportRulesCategories = () => api().export_rules_categories()
