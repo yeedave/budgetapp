@@ -1,0 +1,38 @@
+#!/bin/bash
+# Launcher for Jade Banking — runs inside the .app bundle so macOS shows
+# the correct app name in the dock instead of "python3.12".
+
+BUNDLE="$(cd "$(dirname "$0")/../.." && pwd)"
+PROJECT="$(cd "$BUNDLE/.." && pwd)"
+cd "$PROJECT"
+
+# Find the mamba/conda Python for the budgetapp environment
+if command -v mamba &>/dev/null; then
+    PYTHON="mamba run -n budgetapp python"
+elif command -v conda &>/dev/null; then
+    PYTHON="conda run -n budgetapp python"
+else
+    # Fall back: try to source mamba init and use it
+    MAMBA_INIT="$HOME/mamba/etc/profile.d/conda.sh"
+    [ -f "$MAMBA_INIT" ] && source "$MAMBA_INIT" && conda activate budgetapp
+    MAMBA_INIT2="$HOME/miniforge3/etc/profile.d/conda.sh"
+    [ -f "$MAMBA_INIT2" ] && source "$MAMBA_INIT2" && conda activate budgetapp
+    PYTHON="python3"
+fi
+
+# Detect dev mode: no built frontend → start Vite
+if [ ! -f "$PROJECT/frontend/dist/index.html" ]; then
+    if ! curl -s -o /dev/null http://localhost:5173 2>/dev/null; then
+        echo "Starting Vite dev server..."
+        cd "$PROJECT/frontend"
+        npm run dev &
+        for i in $(seq 1 30); do
+            curl -s -o /dev/null http://localhost:5173 && break
+            sleep 0.5
+        done
+        cd "$PROJECT"
+    fi
+    exec $PYTHON -m budgetapp --dev
+else
+    exec $PYTHON -m budgetapp
+fi
