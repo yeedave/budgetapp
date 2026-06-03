@@ -5,7 +5,7 @@ from datetime import datetime
 import webview
 
 from budgetapp.api.bridge import Api
-from budgetapp.config.settings import APP_HEIGHT, APP_NAME, APP_WIDTH, BACKUP_DIR, FRONTEND_DIST
+from budgetapp.config.settings import APP_HEIGHT, APP_ICON, APP_NAME, APP_WIDTH, BACKUP_DIR, FRONTEND_DIST
 
 
 def _maybe_auto_backup(api: Api) -> None:
@@ -37,7 +37,8 @@ def main() -> None:
         min_size=(900, 600),
     )
     api.set_window(window)
-    webview.start(debug=dev)
+    icon_path = str(APP_ICON) if APP_ICON.exists() else None
+    webview.start(debug=dev, icon=icon_path)
 
 
 if __name__ == "__main__":
