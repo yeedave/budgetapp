@@ -1,8 +1,5 @@
 import { useState, useEffect } from 'react'
-import { exportBackup, importBackup, getSettings, saveSetting, findDuplicateTransactions, deleteTransactionsByIds, recategorizeTransactions, aiCategorizeTransactions, resetTransactions, factoryReset } from '../api'
-
-type DupTx = { id: string; date: string; description: string; amount: string; account_id: string; category_id: string | null; imported_at: string | null }
-type DupGroup = { key: string[]; transactions: DupTx[] }
+import { exportBackup, importBackup, getSettings, saveSetting, resetTransactions, factoryReset } from '../api'
 
 export default function SettingsManager() {
   const [lastBackup, setLastBackup] = useState<string | null>(null)
@@ -18,21 +15,10 @@ export default function SettingsManager() {
   const [modelSaving, setModelSaving] = useState(false)
   const [modelStatus, setModelStatus] = useState<{ type: 'ok' | 'error'; msg: string } | null>(null)
 
-  // Auto-organize
-  const [organizing, setOrganizing] = useState<string | null>(null)
-  const [organizeStatus, setOrganizeStatus] = useState<{ type: 'ok' | 'error'; msg: string } | null>(null)
-
   // Reset
   const [resetConfirm, setResetConfirm] = useState<'transactions' | 'factory' | null>(null)
   const [resetting, setResetting] = useState(false)
   const [resetStatus, setResetStatus] = useState<{ type: 'ok' | 'error'; msg: string } | null>(null)
-
-  // Duplicate transactions
-  const [dupGroups, setDupGroups] = useState<DupGroup[] | null>(null)
-  const [dupScanning, setDupScanning] = useState(false)
-  const [dupSelected, setDupSelected] = useState<Set<string>>(new Set())
-  const [dupDeleting, setDupDeleting] = useState(false)
-  const [dupStatus, setDupStatus] = useState<{ type: 'ok' | 'error'; msg: string } | null>(null)
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -94,17 +80,6 @@ export default function SettingsManager() {
     }
   }
 
-  async function handleOrganize(mode: string) {
-    setOrganizing(mode)
-    setOrganizeStatus(null)
-    const res = mode === 'ai'
-      ? await aiCategorizeTransactions()
-      : await recategorizeTransactions(mode)
-    setOrganizing(null)
-    if (res.ok) setOrganizeStatus({ type: 'ok', msg: `Categorized ${res.updated} transaction${res.updated !== 1 ? 's' : ''}.` })
-    else setOrganizeStatus({ type: 'error', msg: res.error ?? 'Failed.' })
-  }
-
   async function handleReset(type: 'transactions' | 'factory') {
     if (resetConfirm !== type) { setResetConfirm(type); return }
     setResetting(true)
@@ -114,43 +89,6 @@ export default function SettingsManager() {
     setResetConfirm(null)
     if (res.ok) setResetStatus({ type: 'ok', msg: type === 'factory' ? 'All data wiped.' : 'All transactions deleted.' })
     else setResetStatus({ type: 'error', msg: 'Reset failed.' })
-  }
-
-  async function handleScanDuplicates() {
-    setDupScanning(true)
-    setDupStatus(null)
-    setDupGroups(null)
-    const groups = await findDuplicateTransactions()
-    setDupScanning(false)
-    setDupGroups(groups)
-    // Auto-select all but the first in each group (keep oldest, delete newer)
-    const autoSel = new Set<string>()
-    for (const g of groups) {
-      g.transactions.slice(1).forEach((t) => autoSel.add(t.id))
-    }
-    setDupSelected(autoSel)
-  }
-
-  function toggleDup(id: string) {
-    setDupSelected((prev) => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-  }
-
-  async function handleDeleteDuplicates() {
-    if (!dupSelected.size) return
-    setDupDeleting(true)
-    const res = await deleteTransactionsByIds([...dupSelected])
-    setDupDeleting(false)
-    if (res.ok) {
-      setDupStatus({ type: 'ok', msg: `Deleted ${res.deleted} duplicate transaction${res.deleted !== 1 ? 's' : ''}.` })
-      setDupGroups(null)
-      setDupSelected(new Set())
-    } else {
-      setDupStatus({ type: 'error', msg: 'Delete failed.' })
-    }
   }
 
   function fmtDate(iso: string) {
@@ -239,84 +177,6 @@ export default function SettingsManager() {
 
       <hr />
 
-      {/* ── Duplicate Transactions ───────────────────────────────── */}
-      <div>
-        <h2 className="text-lg font-semibold text-gray-800 mb-1">Duplicate Transactions</h2>
-        <p className="text-sm text-gray-500 mb-4">
-          Finds transactions with the same date, description, and amount. The oldest copy is kept by default — uncheck to change.
-        </p>
-
-        <button
-          onClick={handleScanDuplicates}
-          disabled={dupScanning}
-          className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors"
-        >
-          {dupScanning ? 'Scanning…' : 'Scan for Duplicates'}
-        </button>
-
-        {dupStatus && (
-          <p className={`text-sm mt-3 ${dupStatus.type === 'ok' ? 'text-green-600' : 'text-red-600'}`}>
-            {dupStatus.msg}
-          </p>
-        )}
-
-        {dupGroups !== null && dupGroups.length === 0 && (
-          <p className="text-sm text-gray-500 mt-3">No duplicates found.</p>
-        )}
-
-        {dupGroups !== null && dupGroups.length > 0 && (
-          <div className="mt-4 space-y-3">
-            {dupGroups.map((group, gi) => {
-              const amt = parseFloat(group.transactions[0].amount)
-              return (
-                <div key={gi} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-                  <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
-                    <span className="text-sm font-medium text-gray-700 truncate max-w-xs">
-                      {group.transactions[0].description}
-                    </span>
-                    <span className={`text-sm font-medium tabular-nums ml-3 shrink-0 ${amt < 0 ? 'text-red-500' : 'text-green-600'}`}>
-                      {fmt.format(Math.abs(amt))} · {group.key[0]}
-                    </span>
-                  </div>
-                  <div className="divide-y divide-gray-50">
-                    {group.transactions.map((tx, ti) => (
-                      <label key={tx.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={dupSelected.has(tx.id)}
-                          onChange={() => toggleDup(tx.id)}
-                          className="accent-red-500"
-                        />
-                        <span className="flex-1 text-xs text-gray-500">
-                          {tx.imported_at ? `Imported ${fmtDate(tx.imported_at)}` : `Copy ${ti + 1}`}
-                        </span>
-                        <span className="text-xs text-gray-400 font-mono">{tx.id.slice(0, 8)}…</span>
-                        {ti === 0 && (
-                          <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">keep</span>
-                        )}
-                        {dupSelected.has(tx.id) && (
-                          <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded">delete</span>
-                        )}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )
-            })}
-
-            <button
-              onClick={handleDeleteDuplicates}
-              disabled={dupDeleting || dupSelected.size === 0}
-              className="w-full py-2.5 bg-red-600 text-white text-sm font-medium rounded-xl hover:bg-red-700 disabled:opacity-40 transition-colors"
-            >
-              {dupDeleting ? 'Deleting…' : `Delete ${dupSelected.size} Selected`}
-            </button>
-          </div>
-        )}
-      </div>
-
-      <hr />
-
       {/* ── Backup & Restore ────────────────────────────────────── */}
       <div>
         <h2 className="text-lg font-semibold text-gray-800 mb-1">Backup &amp; Restore</h2>
@@ -360,53 +220,6 @@ export default function SettingsManager() {
           On each app launch, if the current month has no backup, one is saved automatically to{' '}
           <code className="bg-gray-100 px-1 rounded text-xs">data/backups/</code>.
         </p>
-      </div>
-
-      <hr />
-
-      {/* ── Auto-organize Transactions ───────────────────────────── */}
-      <div>
-        <h2 className="text-lg font-semibold text-gray-800 mb-1">Auto-organize Transactions</h2>
-        <p className="text-sm text-gray-500 mb-4">
-          Re-run categorization rules against your transactions. AI mode uses Claude for anything rules can't match.
-        </p>
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => handleOrganize('uncategorized')}
-              disabled={organizing !== null}
-              className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors whitespace-nowrap"
-            >
-              {organizing === 'uncategorized' ? 'Running…' : 'Rules → Uncategorized'}
-            </button>
-            <span className="text-xs text-gray-400">Applies rules only to transactions with no category</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => handleOrganize('all')}
-              disabled={organizing !== null}
-              className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors whitespace-nowrap"
-            >
-              {organizing === 'all' ? 'Running…' : 'Rules → All Transactions'}
-            </button>
-            <span className="text-xs text-gray-400">Clears existing categories and re-runs all rules from scratch</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => handleOrganize('ai')}
-              disabled={organizing !== null}
-              className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors whitespace-nowrap"
-            >
-              {organizing === 'ai' ? 'Categorizing…' : 'AI → Uncategorized'}
-            </button>
-            <span className="text-xs text-gray-400">Uses Claude to categorize anything rules can't match</span>
-          </div>
-        </div>
-        {organizeStatus && (
-          <p className={`text-sm mt-3 ${organizeStatus.type === 'ok' ? 'text-green-600' : 'text-red-600'}`}>
-            {organizeStatus.msg}
-          </p>
-        )}
       </div>
 
       <hr />

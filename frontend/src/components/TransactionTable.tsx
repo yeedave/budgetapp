@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react'
 import type { Transaction, Category, Account } from '../types'
 import HelpTooltip from './HelpTooltip'
-import { createSplit, countTransactionsRange, deleteTransactionsRange } from '../api'
+import { createSplit, countTransactionsRange, deleteTransactionsRange, findDuplicateTransactions, deleteTransactionsByIds, recategorizeTransactions, aiCategorizeTransactions } from '../api'
 
 type SortColumn = 'date' | 'description' | 'amount' | 'account' | 'category'
 type SortDir = 'asc' | 'desc'
 interface SortState { col: SortColumn; dir: SortDir }
+
+type DupTx = { id: string; date: string; description: string; amount: string; account_id: string; category_id: string | null }
+type DupGroup = { key: string[]; transactions: DupTx[] }
 
 interface Props {
   transactions: Transaction[]
@@ -16,6 +19,7 @@ interface Props {
   onUpdateAmount: (txId: string, amount: string) => Promise<void>
   onDeleteTransaction: (txId: string) => Promise<void>
   onBulkDeleted: (startDate: string, endDate: string, accountId: string) => void
+  onRefreshTransactions: () => void
 }
 
 const fmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })
@@ -63,7 +67,7 @@ function blankForm(accounts: Account[]): AddForm {
 
 export default function TransactionTable({
   transactions, categories, accounts,
-  onSetCategory, onAddTransaction, onUpdateAmount, onDeleteTransaction, onBulkDeleted,
+  onSetCategory, onAddTransaction, onUpdateAmount, onDeleteTransaction, onBulkDeleted, onRefreshTransactions,
 }: Props) {
   const groups = groupByBucket(categories)
   const [sort, setSort] = useState<SortState>({ col: 'date', dir: 'desc' })
@@ -87,6 +91,19 @@ export default function TransactionTable({
   const [bulkConfirming, setBulkConfirming] = useState(false)
   const [bulkDeleting, setBulkDeleting] = useState(false)
 
+  // Duplicate finder state
+  const [showDuplicates, setShowDuplicates] = useState(false)
+  const [dupGroups, setDupGroups] = useState<DupGroup[] | null>(null)
+  const [dupScanning, setDupScanning] = useState(false)
+  const [dupSelected, setDupSelected] = useState<Set<string>>(new Set())
+  const [dupDeleting, setDupDeleting] = useState(false)
+  const [dupStatus, setDupStatus] = useState<{ type: 'ok' | 'error'; msg: string } | null>(null)
+
+  // Auto-organize state
+  const [showOrganize, setShowOrganize] = useState(false)
+  const [organizing, setOrganizing] = useState<string | null>(null)
+  const [organizeStatus, setOrganizeStatus] = useState<{ type: 'ok' | 'error'; msg: string } | null>(null)
+
   // Re-query preview count whenever the range/account inputs change
   useEffect(() => {
     setBulkCount(null)
@@ -105,6 +122,56 @@ export default function TransactionTable({
     setBulkCount(null)
     setShowBulkDelete(false)
     onBulkDeleted(bulkStart, bulkEnd, bulkAccount)
+  }
+
+  async function handleScanDuplicates() {
+    setDupScanning(true)
+    setDupStatus(null)
+    setDupGroups(null)
+    const groups = await findDuplicateTransactions()
+    setDupScanning(false)
+    setDupGroups(groups)
+    const autoSel = new Set<string>()
+    for (const g of groups) g.transactions.slice(1).forEach((t) => autoSel.add(t.id))
+    setDupSelected(autoSel)
+  }
+
+  function toggleDup(id: string) {
+    setDupSelected((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  async function handleDeleteDuplicates() {
+    if (!dupSelected.size) return
+    setDupDeleting(true)
+    const res = await deleteTransactionsByIds([...dupSelected])
+    setDupDeleting(false)
+    if (res.ok) {
+      setDupStatus({ type: 'ok', msg: `Deleted ${res.deleted} duplicate transaction${res.deleted !== 1 ? 's' : ''}.` })
+      setDupGroups(null)
+      setDupSelected(new Set())
+      onRefreshTransactions()
+    } else {
+      setDupStatus({ type: 'error', msg: 'Delete failed.' })
+    }
+  }
+
+  async function handleOrganize(mode: string) {
+    setOrganizing(mode)
+    setOrganizeStatus(null)
+    const res = mode === 'ai'
+      ? await aiCategorizeTransactions()
+      : await recategorizeTransactions(mode)
+    setOrganizing(null)
+    if (res.ok) {
+      setOrganizeStatus({ type: 'ok', msg: `Categorized ${res.updated} transaction${res.updated !== 1 ? 's' : ''}.` })
+      onRefreshTransactions()
+    } else {
+      setOrganizeStatus({ type: 'error', msg: res.error ?? 'Failed.' })
+    }
   }
 
   function handleSort(col: SortColumn) {
@@ -180,7 +247,27 @@ export default function TransactionTable({
       {/* Toolbar */}
       <div className="px-4 py-2 border-b bg-white flex items-center gap-2 justify-between shrink-0">
         <span className="text-xs text-gray-400">{transactions.length} transaction{transactions.length !== 1 ? 's' : ''}</span>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => { setShowDuplicates((v) => !v); setDupGroups(null); setDupStatus(null) }}
+            className={`text-xs px-3 py-1.5 rounded border transition-colors ${
+              showDuplicates
+                ? 'bg-orange-50 border-orange-300 text-orange-700'
+                : 'border-gray-200 text-gray-500 hover:border-orange-300 hover:text-orange-600'
+            }`}
+          >
+            Find Duplicates
+          </button>
+          <button
+            onClick={() => { setShowOrganize((v) => !v); setOrganizeStatus(null) }}
+            className={`text-xs px-3 py-1.5 rounded border transition-colors ${
+              showOrganize
+                ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
+                : 'border-gray-200 text-gray-500 hover:border-indigo-300 hover:text-indigo-600'
+            }`}
+          >
+            Auto-organize
+          </button>
           <button
             onClick={() => { setShowBulkDelete((v) => !v); setBulkConfirming(false) }}
             className={`text-xs px-3 py-1.5 rounded border transition-colors ${
@@ -199,6 +286,101 @@ export default function TransactionTable({
           </button>
         </div>
       </div>
+
+      {/* Find duplicates panel */}
+      {showDuplicates && (
+        <div className="px-4 py-3 bg-orange-50 border-b shrink-0">
+          <div className="flex items-center gap-3 mb-3">
+            <button
+              onClick={handleScanDuplicates}
+              disabled={dupScanning}
+              className="text-xs px-3 py-1.5 bg-orange-600 text-white rounded hover:bg-orange-700 disabled:opacity-40 transition-colors"
+            >
+              {dupScanning ? 'Scanning…' : 'Scan for Duplicates'}
+            </button>
+            <span className="text-xs text-orange-700">Matches by date + description + amount. Oldest copy kept by default.</span>
+          </div>
+
+          {dupStatus && (
+            <p className={`text-xs mb-2 ${dupStatus.type === 'ok' ? 'text-green-700' : 'text-red-700'}`}>{dupStatus.msg}</p>
+          )}
+
+          {dupGroups !== null && dupGroups.length === 0 && (
+            <p className="text-xs text-gray-500">No duplicates found.</p>
+          )}
+
+          {dupGroups !== null && dupGroups.length > 0 && (
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {dupGroups.map((group, gi) => {
+                const amt = parseFloat(group.transactions[0].amount)
+                return (
+                  <div key={gi} className="bg-white border border-orange-200 rounded-lg overflow-hidden">
+                    <div className="px-3 py-2 bg-orange-50 border-b border-orange-100 flex items-center justify-between">
+                      <span className="text-xs font-medium text-gray-700 truncate max-w-xs">{group.transactions[0].description}</span>
+                      <span className={`text-xs font-medium tabular-nums ml-2 shrink-0 ${amt < 0 ? 'text-red-500' : 'text-green-600'}`}>
+                        {fmt.format(Math.abs(amt))} · {group.key[0]}
+                      </span>
+                    </div>
+                    {group.transactions.map((tx, ti) => (
+                      <label key={tx.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer">
+                        <input type="checkbox" checked={dupSelected.has(tx.id)} onChange={() => toggleDup(tx.id)} className="accent-red-500" />
+                        <span className="flex-1 text-xs text-gray-500">Copy {ti + 1}</span>
+                        <span className="text-xs text-gray-400 font-mono">{tx.id.slice(0, 8)}…</span>
+                        {ti === 0 && <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">keep</span>}
+                        {dupSelected.has(tx.id) && <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded">delete</span>}
+                      </label>
+                    ))}
+                  </div>
+                )
+              })}
+              <button
+                onClick={handleDeleteDuplicates}
+                disabled={dupDeleting || dupSelected.size === 0}
+                className="w-full py-2 bg-red-600 text-white text-xs font-medium rounded-lg hover:bg-red-700 disabled:opacity-40 transition-colors"
+              >
+                {dupDeleting ? 'Deleting…' : `Delete ${dupSelected.size} Selected`}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Auto-organize panel */}
+      {showOrganize && (
+        <div className="px-4 py-3 bg-indigo-50 border-b shrink-0">
+          <div className="flex flex-wrap gap-2 items-center">
+            <button
+              onClick={() => handleOrganize('uncategorized')}
+              disabled={organizing !== null}
+              className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors whitespace-nowrap"
+            >
+              {organizing === 'uncategorized' ? 'Running…' : 'Rules → Uncategorized'}
+            </button>
+            <button
+              onClick={() => handleOrganize('all')}
+              disabled={organizing !== null}
+              className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors whitespace-nowrap"
+            >
+              {organizing === 'all' ? 'Running…' : 'Rules → All'}
+            </button>
+            <button
+              onClick={() => handleOrganize('ai')}
+              disabled={organizing !== null}
+              className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors whitespace-nowrap"
+            >
+              {organizing === 'ai' ? 'Categorizing…' : 'AI → Uncategorized'}
+            </button>
+            {organizeStatus && (
+              <span className={`text-xs ${organizeStatus.type === 'ok' ? 'text-green-700' : 'text-red-700'}`}>
+                {organizeStatus.msg}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-indigo-600 mt-1.5">
+            "Rules → All" clears existing categories and re-runs from scratch. AI mode uses Claude for unmatched transactions.
+          </p>
+        </div>
+      )}
 
       {/* Bulk delete panel */}
       {showBulkDelete && (

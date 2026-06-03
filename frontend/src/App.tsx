@@ -241,6 +241,7 @@ export default function App() {
                   return !(inRange && matchesAccount)
                 }))
               }}
+              onRefreshTransactions={loadTransactions}
             />
           )}
           {view === 'debts' && <DebtManager categories={categories} />}

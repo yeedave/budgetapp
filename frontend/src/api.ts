@@ -65,7 +65,7 @@ interface PywebviewApi {
   export_rules_categories: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
   get_advisor_skills: () => Promise<{ content: string; path: string }>
   save_advisor_skills: (content: string) => Promise<{ ok: boolean; error?: string }>
-  find_duplicate_transactions: () => Promise<{ key: string[]; transactions: { id: string; date: string; description: string; amount: string; account_id: string; category_id: string | null; imported_at: string | null }[] }[]>
+  find_duplicate_transactions: () => Promise<{ key: string[]; transactions: { id: string; date: string; description: string; amount: string; account_id: string; category_id: string | null }[] }[]>
   delete_transactions_by_ids: (ids: string[]) => Promise<{ ok: boolean; deleted: number }>
   recategorize_transactions: (mode: string) => Promise<{ ok: boolean; updated: number; error?: string }>
   ai_categorize_transactions: () => Promise<{ ok: boolean; updated: number; error?: string }>
