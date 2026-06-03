@@ -386,6 +386,35 @@ class Repository:
         self.conn.execute("DELETE FROM transactions WHERE id = ?", (tx_id,))
         self.conn.commit()
 
+    def find_duplicate_transactions(self) -> list[dict]:
+        rows = self.conn.execute(
+            """SELECT t.id, t.date, t.description, CAST(t.amount AS TEXT) AS amount,
+                      t.account_id, t.category_id, t.imported_at
+               FROM transactions t
+               INNER JOIN (
+                   SELECT date, description, amount
+                   FROM transactions
+                   GROUP BY date, description, amount
+                   HAVING COUNT(*) > 1
+               ) dup USING (date, description, amount)
+               ORDER BY t.date, t.description, t.amount, t.imported_at"""
+        ).fetchall()
+        # Group into lists sharing (date, description, amount)
+        from collections import defaultdict
+        groups: dict[tuple, list[dict]] = defaultdict(list)
+        for r in rows:
+            key = (str(r["date"]), r["description"], str(r["amount"]))
+            groups[key].append({k: r[k] for k in r.keys()})
+        return [{"key": list(k), "transactions": v} for k, v in groups.items()]
+
+    def delete_transactions_by_ids(self, ids: list[str]) -> int:
+        if not ids:
+            return 0
+        placeholders = ",".join("?" * len(ids))
+        self.conn.execute(f"DELETE FROM transactions WHERE id IN ({placeholders})", ids)
+        self.conn.commit()
+        return len(ids)
+
     def count_transactions_range(self, start_date: str, end_date: str,
                                  account_id: str | None = None) -> int:
         if account_id:

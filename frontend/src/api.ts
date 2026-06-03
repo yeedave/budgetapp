@@ -65,6 +65,12 @@ interface PywebviewApi {
   export_rules_categories: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
   get_advisor_skills: () => Promise<{ content: string; path: string }>
   save_advisor_skills: (content: string) => Promise<{ ok: boolean; error?: string }>
+  find_duplicate_transactions: () => Promise<{ key: string[]; transactions: { id: string; date: string; description: string; amount: string; account_id: string; category_id: string | null; imported_at: string | null }[] }[]>
+  delete_transactions_by_ids: (ids: string[]) => Promise<{ ok: boolean; deleted: number }>
+  recategorize_transactions: (mode: string) => Promise<{ ok: boolean; updated: number; error?: string }>
+  ai_categorize_transactions: () => Promise<{ ok: boolean; updated: number; error?: string }>
+  reset_transactions: () => Promise<{ ok: boolean }>
+  factory_reset: () => Promise<{ ok: boolean }>
 }
 
 declare global {
@@ -167,3 +173,9 @@ export const applyRuleSuggestions = (newCategories: CategorySuggestion[], rules:
 export const exportRulesCategories = () => api().export_rules_categories()
 export const getAdvisorSkills = () => api().get_advisor_skills()
 export const saveAdvisorSkills = (content: string) => api().save_advisor_skills(content)
+export const findDuplicateTransactions = () => api().find_duplicate_transactions()
+export const deleteTransactionsByIds = (ids: string[]) => api().delete_transactions_by_ids(ids)
+export const recategorizeTransactions = (mode: string) => api().recategorize_transactions(mode)
+export const aiCategorizeTransactions = () => api().ai_categorize_transactions()
+export const resetTransactions = () => api().reset_transactions()
+export const factoryReset = () => api().factory_reset()

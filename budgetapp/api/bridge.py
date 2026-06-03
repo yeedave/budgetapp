@@ -162,6 +162,114 @@ class Api:
         deleted = self._repo.delete_transactions_for_account(account_id)
         return {"ok": True, "deleted": deleted}
 
+    def find_duplicate_transactions(self) -> list[dict]:
+        return self._repo.find_duplicate_transactions()
+
+    def delete_transactions_by_ids(self, ids: list) -> dict:
+        deleted = self._repo.delete_transactions_by_ids([str(i) for i in ids])
+        return {"ok": True, "deleted": deleted}
+
+    # ------------------------------------------------------------------
+    # Auto-organize transactions
+    # ------------------------------------------------------------------
+
+    def recategorize_transactions(self, mode: str = "uncategorized") -> dict:
+        """Re-run rule-based (+ optional AI) categorization.
+
+        mode: 'uncategorized' — only rows with no category_id
+              'all'           — clear all categories first, then re-run
+        """
+        from budgetapp.core.categorizer import categorize
+        import pandas as pd
+
+        txs = self._repo.get_transactions()
+        if not txs:
+            return {"ok": True, "updated": 0}
+
+        if mode == "all":
+            # Clear all existing categories
+            self._repo.conn.execute("UPDATE transactions SET category_id = NULL")
+            self._repo.conn.commit()
+            targets = txs
+        else:
+            targets = [t for t in txs if not t.category_id]
+
+        if not targets:
+            return {"ok": True, "updated": 0}
+
+        df = pd.DataFrame([{
+            "id": t.id, "description": t.description, "amount": str(t.amount),
+            "date": str(t.date), "account_id": t.account_id, "category_id": t.category_id,
+        } for t in targets])
+
+        df = categorize(df, self._repo, use_ai=False)
+
+        updated = 0
+        for _, row in df.iterrows():
+            if row["category_id"]:
+                self._repo.conn.execute(
+                    "UPDATE transactions SET category_id = ? WHERE id = ?",
+                    (row["category_id"], row["id"]),
+                )
+                updated += 1
+        self._repo.conn.commit()
+        return {"ok": True, "updated": updated}
+
+    def ai_categorize_transactions(self) -> dict:
+        """Use Claude to categorize all uncategorized transactions."""
+        from budgetapp.core.categorizer import categorize
+        import pandas as pd
+
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        if not api_key:
+            return {"ok": False, "error": "No Anthropic API key configured. Add it in Settings."}
+
+        txs = [t for t in self._repo.get_transactions() if not t.category_id]
+        if not txs:
+            return {"ok": True, "updated": 0}
+
+        df = pd.DataFrame([{
+            "id": t.id, "description": t.description, "amount": str(t.amount),
+            "date": str(t.date), "account_id": t.account_id, "category_id": None,
+        } for t in txs])
+
+        df = categorize(df, self._repo, use_ai=True)
+
+        updated = 0
+        for _, row in df.iterrows():
+            if row["category_id"]:
+                self._repo.conn.execute(
+                    "UPDATE transactions SET category_id = ? WHERE id = ?",
+                    (row["category_id"], row["id"]),
+                )
+                updated += 1
+        self._repo.conn.commit()
+        return {"ok": True, "updated": updated}
+
+    # ------------------------------------------------------------------
+    # Reset
+    # ------------------------------------------------------------------
+
+    def reset_transactions(self) -> dict:
+        """Delete all transactions but keep accounts, categories, rules, debts."""
+        self._repo.conn.execute("DELETE FROM transactions")
+        self._repo.conn.commit()
+        return {"ok": True}
+
+    def factory_reset(self) -> dict:
+        """Wipe all data from every table. Keeps the schema intact."""
+        tables = ["transactions", "splits", "debts", "savings_trackers",
+                  "categorization_rules", "categories", "accounts", "assets",
+                  "import_log"]
+        for table in tables:
+            try:
+                self._repo.conn.execute(f"DELETE FROM {table}")
+            except Exception:
+                pass
+        self._repo.conn.execute("DELETE FROM settings WHERE key != 'anthropic_api_key' AND key != 'anthropic_model'")
+        self._repo.conn.commit()
+        return {"ok": True}
+
     def set_category_budget(self, category_id: str, budget_amount: str) -> None:
         self._repo.set_category_budget(category_id, budget_amount or None)
 
