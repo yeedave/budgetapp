@@ -9,9 +9,13 @@ from budgetapp.config.settings import APP_HEIGHT, APP_ICON, APP_NAME, APP_WIDTH,
 
 
 def _set_macos_app_name(name: str) -> None:
-    """Set CFBundleName so the dock label shows the app name, not 'python3.12'."""
+    """Set the process name and bundle metadata so macOS dock/menu shows the app name."""
     try:
+        import Foundation
         import AppKit
+        # Change the process name — this is what the dock label reads for non-bundled apps
+        Foundation.NSProcessInfo.processInfo().setProcessName_(name)
+        # Also set bundle keys for the menu bar / About dialog
         bundle = AppKit.NSBundle.mainBundle()
         info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
         info['CFBundleName'] = name
