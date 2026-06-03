@@ -18,3 +18,4 @@ APP_HEIGHT = 900
 
 BACKUP_DIR = PROJECT_ROOT / "data" / "backups"
 SETTINGS_FILE = PROJECT_ROOT / "data" / "settings.json"
+ADVISOR_SKILLS_FILE = PROJECT_ROOT / "data" / "advisor_skills.md"

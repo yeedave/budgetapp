@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from budgetapp.config.settings import BACKUP_DIR, DB_PATH, SETTINGS_FILE
+from budgetapp.config.settings import ADVISOR_SKILLS_FILE, BACKUP_DIR, DB_PATH, SETTINGS_FILE
 from budgetapp.core.categorizer import categorize
 from budgetapp.parsers.apple import AppleParser
 from budgetapp.parsers.chase import ChaseParser
@@ -872,6 +872,12 @@ class Api:
 
             system_prompt = "\n".join(lines)
 
+            # Append custom skills from data/advisor_skills.md if present
+            if ADVISOR_SKILLS_FILE.exists():
+                skills_text = ADVISOR_SKILLS_FILE.read_text(encoding="utf-8").strip()
+                if skills_text:
+                    system_prompt += f"\n\n---\n\n## Custom Advisor Instructions\n\n{skills_text}"
+
             # ── Call Claude ──────────────────────────────────────────
             model = self.get_settings().get("anthropic_model") or "claude-opus-4-7"
             client = anthropic.Anthropic(api_key=api_key)
@@ -1060,3 +1066,20 @@ class Api:
 
         out_path.write_text(json.dumps(data, indent=2, default=str))
         return {"ok": True, "path": str(out_path)}
+
+    # ------------------------------------------------------------------
+    # Advisor skills file
+    # ------------------------------------------------------------------
+
+    def get_advisor_skills(self) -> dict:
+        if ADVISOR_SKILLS_FILE.exists():
+            return {"content": ADVISOR_SKILLS_FILE.read_text(encoding="utf-8"), "path": str(ADVISOR_SKILLS_FILE)}
+        return {"content": "", "path": str(ADVISOR_SKILLS_FILE)}
+
+    def save_advisor_skills(self, content: str) -> dict:
+        try:
+            ADVISOR_SKILLS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            ADVISOR_SKILLS_FILE.write_text(content, encoding="utf-8")
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}

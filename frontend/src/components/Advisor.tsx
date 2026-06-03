@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import type { CategorySuggestion, RuleSuggestion } from '../types'
-import { chatAdvisor, generateRulesFromTransactions, applyRuleSuggestions, exportRulesCategories } from '../api'
+import { chatAdvisor, generateRulesFromTransactions, applyRuleSuggestions, exportRulesCategories, getAdvisorSkills, saveAdvisorSkills } from '../api'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -213,7 +213,7 @@ function RulesReview({
 
 // ── Main Advisor ──────────────────────────────────────────────────────────────
 
-type AdvisorView = 'chat' | 'rules'
+type AdvisorView = 'chat' | 'rules' | 'skills'
 
 export default function Advisor() {
   const [view, setView] = useState<AdvisorView>('chat')
@@ -238,6 +238,12 @@ export default function Advisor() {
   // Export rules state
   const [exporting, setExporting] = useState(false)
   const [exportStatus, setExportStatus] = useState<{ type: 'ok' | 'error'; msg: string } | null>(null)
+
+  // Skills editor state
+  const [skillsText, setSkillsText] = useState('')
+  const [skillsPath, setSkillsPath] = useState('')
+  const [skillsSaving, setSkillsSaving] = useState(false)
+  const [skillsStatus, setSkillsStatus] = useState<{ type: 'ok' | 'error'; msg: string } | null>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -299,6 +305,69 @@ export default function Advisor() {
     if (res.cancelled) return
     if (res.ok) setExportStatus({ type: 'ok', msg: `Saved to ${res.path}` })
     else setExportStatus({ type: 'error', msg: res.error ?? 'Export failed.' })
+  }
+
+  async function handleOpenSkills() {
+    const res = await getAdvisorSkills()
+    setSkillsText(res.content)
+    setSkillsPath(res.path)
+    setSkillsStatus(null)
+    setView('skills')
+  }
+
+  async function handleSaveSkills() {
+    setSkillsSaving(true)
+    setSkillsStatus(null)
+    const res = await saveAdvisorSkills(skillsText)
+    setSkillsSaving(false)
+    if (res.ok) setSkillsStatus({ type: 'ok', msg: 'Saved — takes effect on next message.' })
+    else setSkillsStatus({ type: 'error', msg: res.error ?? 'Save failed.' })
+  }
+
+  // ── Skills editor view ─────────────────────────────────────────────────────
+
+  if (view === 'skills') {
+    return (
+      <div className="flex flex-col h-full bg-gray-50">
+        <div className="shrink-0 bg-white border-b px-6 py-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900">Advisor Skills</h2>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Custom instructions added to every conversation · saved to{' '}
+              <code className="bg-gray-100 px-1 rounded">{skillsPath || 'data/advisor_skills.md'}</code>
+            </p>
+          </div>
+          <button onClick={() => setView('chat')} className="text-xs text-gray-400 hover:text-gray-600 transition-colors">
+            ← Back to Chat
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-hidden flex flex-col px-6 py-5 gap-3">
+          <textarea
+            className="flex-1 resize-none border border-gray-200 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white leading-relaxed"
+            value={skillsText}
+            onChange={(e) => setSkillsText(e.target.value)}
+            placeholder="# Add custom instructions here&#10;&#10;Examples:&#10;- This budget covers 2 people (Dave and Cam).&#10;- Keep responses concise with bullet points.&#10;- Our goal is to be debt-free by end of 2026."
+            spellCheck={false}
+          />
+          {skillsStatus && (
+            <p className={`text-xs ${skillsStatus.type === 'ok' ? 'text-green-600' : 'text-red-500'}`}>
+              {skillsStatus.msg}
+            </p>
+          )}
+        </div>
+
+        <div className="shrink-0 bg-white border-t px-6 py-4">
+          <button
+            onClick={handleSaveSkills}
+            disabled={skillsSaving}
+            className="px-5 py-2 bg-indigo-600 text-white text-sm rounded-xl hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+          >
+            {skillsSaving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    )
   }
 
   // ── Rules review view ───────────────────────────────────────────────────────
@@ -381,6 +450,15 @@ export default function Advisor() {
               </span>
             )}
           </div>
+
+          {/* Skills button */}
+          <button
+            onClick={handleOpenSkills}
+            title="Edit custom advisor instructions"
+            className="px-3 py-1.5 text-xs bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors whitespace-nowrap"
+          >
+            Skills
+          </button>
 
           {messages.length > 0 && (
             <button

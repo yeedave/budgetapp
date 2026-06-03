@@ -63,6 +63,8 @@ interface PywebviewApi {
   generate_rules_from_transactions: (month?: string) => Promise<GenerateRulesResult>
   apply_rule_suggestions: (new_categories: CategorySuggestion[], rules: RuleSuggestion[]) => Promise<{ ok: boolean; created_categories: number; created_rules: number; error?: string }>
   export_rules_categories: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
+  get_advisor_skills: () => Promise<{ content: string; path: string }>
+  save_advisor_skills: (content: string) => Promise<{ ok: boolean; error?: string }>
 }
 
 declare global {
@@ -162,3 +164,5 @@ export const getCalendarData = (yearMonth: string) => api().get_calendar_data(ye
 export const generateRulesFromTransactions = (month = '') => api().generate_rules_from_transactions(month)
 export const applyRuleSuggestions = (newCategories: CategorySuggestion[], rules: RuleSuggestion[]) => api().apply_rule_suggestions(newCategories, rules)
 export const exportRulesCategories = () => api().export_rules_categories()
+export const getAdvisorSkills = () => api().get_advisor_skills()
+export const saveAdvisorSkills = (content: string) => api().save_advisor_skills(content)
