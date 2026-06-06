@@ -11,8 +11,8 @@ from budgetapp.core.models import Account, Category, Transaction
 from budgetapp.storage.database import get_connection, init_db
 
 
-def _tx_id(date: str, description: str, amount: str, account_id: str) -> str:
-    raw = f"{date}|{description}|{amount}|{account_id}"
+def _tx_id(date: str, description: str, amount: str, account_id: str, seq: int = 0) -> str:
+    raw = f"{date}|{description}|{amount}|{account_id}|{seq}"
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
@@ -37,10 +37,18 @@ class Repository:
     def upsert_transactions(self, df: pd.DataFrame, user: str = "dave") -> int:
         """Insert parsed DataFrame rows; skip duplicates. Returns count inserted."""
         rows = []
+        seen_ids: set[str] = set()  # IDs used so far in this batch
         for _, row in df.iterrows():
             date_str = row["date"].isoformat()
             amount_str = str(row["amount"])
-            tx_id = _tx_id(date_str, row["description"], amount_str, row["account_id"])
+            # Increment seq until we find an ID not already used in this batch.
+            # seq=0 is backward-compatible with previously imported transactions.
+            seq = 0
+            tx_id = _tx_id(date_str, row["description"], amount_str, row["account_id"], seq)
+            while tx_id in seen_ids:
+                seq += 1
+                tx_id = _tx_id(date_str, row["description"], amount_str, row["account_id"], seq)
+            seen_ids.add(tx_id)
             cat = row.get("category_id") if "category_id" in df.columns else None
             if not isinstance(cat, str):
                 cat = None  # coerce NaN / None
