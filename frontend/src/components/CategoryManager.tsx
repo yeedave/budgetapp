@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import type { Category, Rule } from '../types'
-import { addCategory, deleteCategory, setCategoryBudget, getRules, saveRule, deleteRule } from '../api'
+import { addCategory, updateCategory, deleteCategory, setCategoryBudget, getRules, saveRule, deleteRule } from '../api'
 import HelpTooltip from './HelpTooltip'
 
 const BUCKET_ORDER = ['income', 'bills', 'subscriptions', 'expenses', 'savings', 'debts', 'transfers']
@@ -22,6 +22,12 @@ export default function CategoryManager({ categories, onCategoriesChange }: Prop
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  // Inline edit state: maps category id → { name, bucket, owner } while editing
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<{ name: string; bucket: string; owner: string }>({ name: '', bucket: '', owner: '' })
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
 
   const [rules, setRules] = useState<Rule[]>([])
   const [rulePattern, setRulePattern] = useState('')
@@ -57,6 +63,25 @@ export default function CategoryManager({ categories, onCategoriesChange }: Prop
     const result = await deleteCategory(cat.id)
     if (!result.ok) { setDeleteError(result.error ?? 'Could not delete category.'); return }
     onCategoriesChange(categories.filter((c) => c.id !== cat.id))
+  }
+
+  function startEdit(cat: Category) {
+    setEditingId(cat.id)
+    setEditForm({ name: cat.name, bucket: cat.bucket, owner: cat.owner })
+    setEditError(null)
+  }
+
+  async function handleSaveEdit(cat: Category) {
+    if (!editForm.name.trim()) return
+    setEditSaving(true)
+    setEditError(null)
+    const res = await updateCategory(cat.id, editForm.name.trim(), editForm.bucket, editForm.owner)
+    setEditSaving(false)
+    if (!res.ok) { setEditError(res.error ?? 'Failed to save.'); return }
+    onCategoriesChange(categories.map((c) =>
+      c.id === cat.id ? { ...c, name: editForm.name.trim(), bucket: editForm.bucket, owner: editForm.owner } : c
+    ))
+    setEditingId(null)
   }
 
   const handleAddRule = async () => {
@@ -166,36 +191,84 @@ export default function CategoryManager({ categories, onCategoriesChange }: Prop
             ) : (
               <div className="space-y-1.5">
                 {byBucket[b].map((cat) => (
-                  <div key={cat.id} className="flex items-center justify-between group">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="text-sm text-gray-700 truncate">{cat.name}</span>
-                      <span className="text-xs text-gray-400 capitalize shrink-0">{cat.owner}</span>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {/* Budget input — shown for all non-transfer/non-income buckets */}
-                      {b !== 'transfers' && (
-                        <div className="flex items-center gap-0.5 text-xs text-gray-400">
-                          <span>$</span>
-                          <input
-                            className="w-20 border rounded px-1.5 py-0.5 text-xs text-right text-gray-700 focus:outline-none focus:ring-1 focus:ring-green-500"
-                            value={budgetInputs[cat.id] ?? ''}
-                            placeholder="—"
-                            onChange={(e) =>
-                              setBudgetInputs((prev) => ({ ...prev, [cat.id]: e.target.value }))
-                            }
-                            onBlur={() => handleBudgetBlur(cat)}
-                          />
-                          <span>/mo</span>
+                  <div key={cat.id}>
+                    {editingId === cat.id ? (
+                      /* ── Edit mode ── */
+                      <div className="flex flex-wrap items-center gap-2 py-1">
+                        <input
+                          className="border rounded px-2 py-1 text-sm w-44 focus:outline-none focus:ring-2 focus:ring-green-500"
+                          value={editForm.name}
+                          onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(cat); if (e.key === 'Escape') setEditingId(null) }}
+                          autoFocus
+                        />
+                        <select
+                          className="border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                          value={editForm.bucket}
+                          onChange={(e) => setEditForm((f) => ({ ...f, bucket: e.target.value }))}
+                        >
+                          {BUCKET_ORDER.map((bk) => <option key={bk} value={bk}>{BUCKET_LABEL[bk]}</option>)}
+                        </select>
+                        <select
+                          className="border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                          value={editForm.owner}
+                          onChange={(e) => setEditForm((f) => ({ ...f, owner: e.target.value }))}
+                        >
+                          {OWNERS.map((o) => <option key={o} value={o}>{o.charAt(0).toUpperCase() + o.slice(1)}</option>)}
+                        </select>
+                        <button
+                          onClick={() => handleSaveEdit(cat)}
+                          disabled={editSaving || !editForm.name.trim()}
+                          className="px-3 py-1 bg-green-700 text-white text-xs rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
+                        >
+                          {editSaving ? 'Saving…' : 'Save'}
+                        </button>
+                        <button
+                          onClick={() => setEditingId(null)}
+                          className="px-2 py-1 text-xs text-gray-400 hover:text-gray-700"
+                        >
+                          Cancel
+                        </button>
+                        {editError && <span className="text-xs text-red-600">{editError}</span>}
+                      </div>
+                    ) : (
+                      /* ── View mode ── */
+                      <div className="flex items-center justify-between group">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="text-sm text-gray-700 truncate">{cat.name}</span>
+                          <span className="text-xs text-gray-400 capitalize shrink-0">{cat.owner}</span>
                         </div>
-                      )}
-                      <button
-                        onClick={() => handleDelete(cat)}
-                        className="text-xs text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all px-1"
-                        title="Delete category"
-                      >
-                        ✕
-                      </button>
-                    </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {b !== 'transfers' && (
+                            <div className="flex items-center gap-0.5 text-xs text-gray-400">
+                              <span>$</span>
+                              <input
+                                className="w-20 border rounded px-1.5 py-0.5 text-xs text-right text-gray-700 focus:outline-none focus:ring-1 focus:ring-green-500"
+                                value={budgetInputs[cat.id] ?? ''}
+                                placeholder="—"
+                                onChange={(e) => setBudgetInputs((prev) => ({ ...prev, [cat.id]: e.target.value }))}
+                                onBlur={() => handleBudgetBlur(cat)}
+                              />
+                              <span>/mo</span>
+                            </div>
+                          )}
+                          <button
+                            onClick={() => startEdit(cat)}
+                            className="text-xs text-gray-300 hover:text-green-700 opacity-0 group-hover:opacity-100 transition-all px-1"
+                            title="Edit category"
+                          >
+                            ✎
+                          </button>
+                          <button
+                            onClick={() => handleDelete(cat)}
+                            className="text-xs text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all px-1"
+                            title="Delete category"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

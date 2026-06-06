@@ -282,6 +282,18 @@ class Api:
         self._repo.upsert_category(cat)
         return {"id": cat_id, "name": name, "bucket": bucket, "owner": owner, "budget_amount": None}
 
+    def update_category(self, category_id: str, name: str, bucket: str, owner: str) -> dict:
+        from budgetapp.core.models import Category
+        existing = next((c for c in self._repo.get_categories() if c.id == category_id), None)
+        if not existing:
+            return {"ok": False, "error": "Category not found"}
+        updated = Category(
+            id=category_id, name=name, bucket=bucket, owner=owner,
+            budget_amount=existing.budget_amount,
+        )
+        self._repo.upsert_category(updated)
+        return {"ok": True}
+
     def delete_category(self, category_id: str) -> dict:
         try:
             self._repo.delete_category(category_id)

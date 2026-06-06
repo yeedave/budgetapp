@@ -24,6 +24,7 @@ interface PywebviewApi {
   save_account_order: (ids: string[]) => Promise<void>
   set_category_budget: (category_id: string, budget_amount: string) => Promise<void>
   add_category: (name: string, bucket: string, owner: string) => Promise<Category>
+  update_category: (id: string, name: string, bucket: string, owner: string) => Promise<{ ok: boolean; error?: string }>
   delete_category: (category_id: string) => Promise<{ ok: boolean; error?: string }>
   link_debt_category: (debt_id: string, category_id: string) => Promise<void>
   get_savings_trackers: () => Promise<SavingsTracker[]>
@@ -123,6 +124,8 @@ export const setCategoryBudget = (categoryId: string, budgetAmount: string) =>
 
 export const addCategory = (name: string, bucket: string, owner: string) =>
   api().add_category(name, bucket, owner)
+export const updateCategory = (id: string, name: string, bucket: string, owner: string) =>
+  api().update_category(id, name, bucket, owner)
 export const deleteCategory = (categoryId: string) =>
   api().delete_category(categoryId)
 
