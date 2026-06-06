@@ -387,24 +387,59 @@ class Repository:
         self.conn.commit()
 
     def find_duplicate_transactions(self) -> list[dict]:
+        # Pull all transactions where (date, amount) has multiple entries.
+        # Description similarity is handled in Python to support case-insensitive
+        # and prefix matching (e.g. "STARBUCKS" vs "STARBUCKS #1234 CA").
         rows = self.conn.execute(
             """SELECT t.rowid, t.id, t.date, t.description, t.amount,
                       t.account_id, t.category_id
                FROM transactions t
                INNER JOIN (
-                   SELECT date, description, amount
+                   SELECT date, amount
                    FROM transactions
-                   GROUP BY date, description, amount
+                   GROUP BY date, amount
                    HAVING COUNT(*) > 1
-               ) dup USING (date, description, amount)
-               ORDER BY t.date, t.description, t.amount, t.rowid"""
+               ) dup ON t.date = dup.date AND t.amount = dup.amount
+               ORDER BY t.date, t.amount, t.rowid"""
         ).fetchall()
+
+        def _desc_similar(a: str, b: str) -> bool:
+            a, b = a.lower().strip(), b.lower().strip()
+            if a == b:
+                return True
+            # One description is a prefix of the other (min 5 chars to avoid
+            # false positives on short strings like "ACH" or "ATM").
+            short, long = (a, b) if len(a) <= len(b) else (b, a)
+            return len(short) >= 5 and long.startswith(short)
+
         from collections import defaultdict
-        groups: dict[tuple, list[dict]] = defaultdict(list)
+        by_date_amount: dict[tuple, list[dict]] = defaultdict(list)
         for r in rows:
-            key = (str(r["date"]), r["description"], str(r["amount"]))
-            groups[key].append({k: r[k] for k in r.keys()})
-        return [{"key": list(k), "transactions": v} for k, v in groups.items()]
+            key = (str(r["date"]), str(r["amount"]))
+            by_date_amount[key].append({k: r[k] for k in r.keys()})
+
+        result = []
+        for txs in by_date_amount.values():
+            # Cluster transactions whose descriptions are similar
+            clusters: list[list[dict]] = []
+            for tx in txs:
+                placed = False
+                for cluster in clusters:
+                    if _desc_similar(tx["description"], cluster[0]["description"]):
+                        cluster.append(tx)
+                        placed = True
+                        break
+                if not placed:
+                    clusters.append([tx])
+            for cluster in clusters:
+                if len(cluster) > 1:
+                    rep = cluster[0]
+                    result.append({
+                        "key": [str(rep["date"]), rep["description"], str(rep["amount"])],
+                        "transactions": cluster,
+                    })
+
+        return result
 
     def delete_transactions_by_ids(self, ids: list[str]) -> int:
         if not ids:
