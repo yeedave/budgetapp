@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import type { Category, CalendarTx, ScheduledItem, UpcomingScheduledItem, ManualRecurring, RecurringItem } from '../types'
 import {
   getCalendarData, excludeRecurring, unexcludeRecurring, getRecurringExcluded,
-  getUpcomingScheduled, getManualRecurring, addManualRecurring, deleteManualRecurring,
+  getManualRecurring, addManualRecurring, deleteManualRecurring,
   detectRecurring, saveDebtDueDay,
 } from '../api'
 
@@ -55,7 +55,6 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
   const [showExcludedPanel, setShowExcludedPanel] = useState(false)
   const [busyLabel, setBusyLabel] = useState<string | null>(null)
 
-  const [upcoming, setUpcoming] = useState<UpcomingScheduledItem[]>([])
   const [manualRecurring, setManualRecurring] = useState<ManualRecurring[]>([])
   const [showAddForm, setShowAddForm] = useState(false)
   const [showManagedRecurring, setShowManagedRecurring] = useState(false)
@@ -102,9 +101,7 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
   }
 
   async function refreshUpcomingAndManual() {
-    const [up, mr] = await Promise.all([getUpcomingScheduled(60), getManualRecurring()])
-    setUpcoming(up)
-    setManualRecurring(mr)
+    setManualRecurring(await getManualRecurring())
   }
 
   useEffect(() => { loadCalendar() }, [yearMonth])
@@ -508,49 +505,57 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
 
         {/* Cash needed — total due for the rest of the current calendar month */}
         {(() => {
-          const today_ = new Date()
-          today_.setHours(0, 0, 0, 0)
-          const endOfMonth = new Date(today_.getFullYear(), today_.getMonth() + 1, 0)
-          endOfMonth.setHours(23, 59, 59, 999)
-          const currentMonthName = today_.toLocaleString('en-US', { month: 'long' })
-          const inWindow = upcoming.filter((u) => {
-            const d = new Date(u.date + 'T00:00:00').getTime()
-            return d >= today_.getTime() && d <= endOfMonth.getTime()
-                   && u.amount != null && u.source !== 'income'
-          })
-          const incomeInWindow = upcoming.filter((u) => {
-            const d = new Date(u.date + 'T00:00:00').getTime()
-            return d >= today_.getTime() && d <= endOfMonth.getTime()
-                   && u.amount != null && u.source === 'income'
-          })
-          const incomeTotal = incomeInWindow.reduce(
-            (s, u) => s + Math.abs(parseFloat(String(u.amount))),
-            0,
-          )
-          const totalsBySource = inWindow.reduce<Record<string, number>>((acc, u) => {
-            const amt = Math.abs(parseFloat(String(u.amount)))
-            acc[u.source] = (acc[u.source] ?? 0) + amt
-            return acc
-          }, {})
-          const total = Object.values(totalsBySource).reduce((s, n) => s + n, 0)
+          // Drive the totals off scheduledByDay so the card follows the
+          // calendar's currently-navigated month, not always today's month.
+          const isCurrentMonth = today.getFullYear() === year && today.getMonth() + 1 === month
+          const isPastMonth = (year < today.getFullYear()) ||
+            (year === today.getFullYear() && month < today.getMonth() + 1)
+          let expenseTotal = 0
+          let incomeTotal = 0
+          let expenseCount = 0
+          const totalsBySource: Record<string, number> = {}
+          for (const [dayStr, items] of Object.entries(scheduledByDay)) {
+            const d = Number(dayStr)
+            // In the current month skip past days — they're already "spent"
+            if (isCurrentMonth && d < today.getDate()) continue
+            for (const s of items) {
+              if (s.amount == null) continue
+              const amt = Math.abs(parseFloat(String(s.amount)))
+              if (s.source === 'income') {
+                incomeTotal += amt
+              } else {
+                expenseTotal += amt
+                expenseCount += 1
+                totalsBySource[s.source] = (totalsBySource[s.source] ?? 0) + amt
+              }
+            }
+          }
+          const total = expenseTotal
           const sourceLabels: Record<string, { label: string; color: string }> = {
             debt: { label: 'Debt payments', color: 'text-orange-500' },
             recurring: { label: 'Auto-detected', color: 'text-blue-400' },
             manual: { label: 'Manual recurring', color: 'text-purple-500' },
           }
+          const navMonthName = monthLabel.split(' ')[0]
+          const cardSubtitle = isPastMonth
+            ? monthLabel
+            : isCurrentMonth ? `rest of ${navMonthName}` : `all of ${navMonthName}`
+          const totalLabel = isPastMonth
+            ? `Total that was due in ${monthLabel}`
+            : isCurrentMonth ? 'Total due before month end' : `Total due in ${monthLabel}`
           return (
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
               <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-gray-700">Cash needed</h3>
-                <span className="text-xs text-gray-400">rest of {currentMonthName}</span>
+                <span className="text-xs text-gray-400">{cardSubtitle}</span>
               </div>
               <div className="px-4 py-3">
-                <div className="text-xs text-gray-400 mb-1">Total due before month end</div>
+                <div className="text-xs text-gray-400 mb-1">{totalLabel}</div>
                 <div className="text-2xl font-semibold text-gray-800 tabular-nums">
                   {currFmt.format(total)}
                 </div>
                 <div className="text-xs text-gray-400 mt-1">
-                  {inWindow.length} payment{inWindow.length !== 1 ? 's' : ''} due
+                  {expenseCount} payment{expenseCount !== 1 ? 's' : ''} due
                   {incomeTotal > 0 && (
                     <> · <span className="text-green-600 font-medium">{currFmt.format(incomeTotal)}</span> incoming</>
                   )}
