@@ -18,6 +18,30 @@ from budgetapp.storage.repository import Repository
 _AUTO_PARSERS = [ChaseParser, WellsFargoParser, AppleParser, MarcusParser]
 
 
+def _to_float(v) -> float:
+    """Parse user-stored numbers tolerantly — strips currency symbols and thousands
+    separators. Accepts comma-as-decimal too (e.g. "19,470.84" or "19.470,84")."""
+    if v is None or v == "":
+        return 0.0
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip().replace("$", "").replace(" ", "")
+    if "," in s and "." in s:
+        # Either 19,470.84 (US: comma is thousands) or 19.470,84 (EU: dot is thousands)
+        s = s.replace(",", "") if s.rfind(",") < s.rfind(".") else s.replace(".", "").replace(",", ".")
+    elif "," in s:
+        # No dot — comma could be either; treat as decimal only if exactly one and 1-2 digits after
+        last = s.rfind(",")
+        if len(s) - last - 1 in (1, 2) and s.count(",") == 1:
+            s = s.replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
 def _tx_dict(row) -> dict:
     return {
         "id": row["id"],
@@ -89,6 +113,13 @@ class Api:
         return _tx_dict({"id": tx.id, "date": tx.date, "description": tx.description,
                          "amount": tx.amount, "account_id": tx.account_id,
                          "category_id": tx.category_id, "is_manual": tx.is_manual})
+
+    def flip_transaction_sign(self, tx_id: str) -> dict:
+        try:
+            self._repo.flip_transaction_sign(tx_id)
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     def update_transaction_amount(self, tx_id: str, amount: str) -> dict:
         try:
@@ -174,10 +205,10 @@ class Api:
     # ------------------------------------------------------------------
 
     def recategorize_transactions(self, mode: str = "uncategorized") -> dict:
-        """Re-run rule-based (+ optional AI) categorization.
+        """Re-run rule-based categorization, updating debt/savings balances correctly.
 
         mode: 'uncategorized' — only rows with no category_id
-              'all'           — clear all categories first, then re-run
+              'all'           — re-categorize all (set_category handles old→new balance diff)
         """
         from budgetapp.core.categorizer import categorize
         import pandas as pd
@@ -186,14 +217,7 @@ class Api:
         if not txs:
             return {"ok": True, "updated": 0}
 
-        if mode == "all":
-            # Clear all existing categories
-            self._repo.conn.execute("UPDATE transactions SET category_id = NULL")
-            self._repo.conn.commit()
-            targets = txs
-        else:
-            targets = [t for t in txs if not t.category_id]
-
+        targets = txs if mode == "all" else [t for t in txs if not t.category_id]
         if not targets:
             return {"ok": True, "updated": 0}
 
@@ -205,14 +229,17 @@ class Api:
         df = categorize(df, self._repo, use_ai=False)
 
         updated = 0
+        seen: set[str] = set()
         for _, row in df.iterrows():
-            if row["category_id"]:
-                self._repo.conn.execute(
-                    "UPDATE transactions SET category_id = ? WHERE id = ?",
-                    (row["category_id"], row["id"]),
-                )
+            tx_id = row["id"]
+            if tx_id in seen:
+                continue
+            new_cat = row["category_id"] or None
+            # Route through set_category so _adjust_linked_balance fires for debts/savings
+            updated_ids = self._repo.set_category(tx_id, new_cat)
+            seen.update(updated_ids)
+            if new_cat:
                 updated += 1
-        self._repo.conn.commit()
         return {"ok": True, "updated": updated}
 
     def ai_categorize_transactions(self) -> dict:
@@ -236,12 +263,15 @@ class Api:
         df = categorize(df, self._repo, use_ai=True)
 
         updated = 0
+        seen: set[str] = set()
         for _, row in df.iterrows():
-            if row["category_id"]:
-                self._repo.conn.execute(
-                    "UPDATE transactions SET category_id = ? WHERE id = ?",
-                    (row["category_id"], row["id"]),
-                )
+            tx_id = row["id"]
+            if tx_id in seen:
+                continue
+            new_cat = row["category_id"] or None
+            if new_cat:
+                updated_ids = self._repo.set_category(tx_id, new_cat)
+                seen.update(updated_ids)
                 updated += 1
         self._repo.conn.commit()
         return {"ok": True, "updated": updated}
@@ -310,14 +340,25 @@ class Api:
     def save_savings_tracker(self, tracker: dict) -> None:
         import re
         t_id = tracker.get("id") or re.sub(r'[^a-z0-9]+', '_', tracker["name"].lower()).strip('_')[:40]
+
+        def _clean(v):
+            if v is None or v == "":
+                return None
+            return str(_to_float(v))
+
         self._repo.upsert_savings_tracker(
             id=t_id,
             name=tracker["name"],
-            balance=tracker.get("balance") or "0",
+            balance=_clean(tracker.get("balance")) or "0",
             category_id=tracker.get("category_id") or None,
-            goal_amount=tracker.get("goal_amount") or None,
-            monthly_contribution=tracker.get("monthly_contribution") or None,
+            goal_amount=_clean(tracker.get("goal_amount")),
+            monthly_contribution=_clean(tracker.get("monthly_contribution")),
         )
+        # Replace spend-category links if provided in the payload
+        if "spend_categories" in tracker:
+            spend_cats = tracker.get("spend_categories") or []
+            if isinstance(spend_cats, list):
+                self._repo.set_tracker_spend_categories(t_id, [str(c) for c in spend_cats if c])
 
     def delete_savings_tracker(self, tracker_id: str) -> None:
         self._repo.delete_savings_tracker(tracker_id)
@@ -331,12 +372,16 @@ class Api:
             months_remaining = int(mr) if mr not in (None, "", "null") else None
         except (ValueError, TypeError):
             months_remaining = None
+
+        def _clean(v):
+            return str(_to_float(v)) if v not in (None, "", "null") else None
+
         return self._repo.upsert_debt(
             id=debt["id"],
             name=debt["name"],
-            balance=debt.get("balance") or None,
-            apr=debt.get("apr") or None,
-            minimum=debt.get("minimum") or None,
+            balance=_clean(debt.get("balance")),
+            apr=_clean(debt.get("apr")),
+            minimum=_clean(debt.get("minimum")),
             months_remaining=months_remaining,
         )
 
@@ -451,6 +496,28 @@ class Api:
         df["account_id"] = force_account_id
 
         try:
+            # Filter out rows that already exist as a near-duplicate. Catches the
+            # case where a pending transaction was pasted earlier (with today's
+            # date) and the PDF later posts the real version (1-3 days later
+            # with a slightly different description).
+            skipped_near = 0
+            keep_mask = []
+            for _, row in df.iterrows():
+                match = self._repo.find_existing_near_match(
+                    force_account_id,
+                    row["date"].isoformat(),
+                    str(row["amount"]),
+                    row["description"],
+                    date_window_days=3,
+                )
+                if match:
+                    skipped_near += 1
+                    keep_mask.append(False)
+                else:
+                    keep_mask.append(True)
+            if skipped_near:
+                df = df[keep_mask].reset_index(drop=True)
+
             df = categorize(df, self._repo,
                             use_ai=bool(os.environ.get("ANTHROPIC_API_KEY")))
             inserted = self._repo.upsert_transactions(df)
@@ -477,7 +544,60 @@ class Api:
                 filename=pdf_name,
                 inserted=inserted,
             )
-            return {"inserted": inserted}
+            return {"inserted": inserted, "skipped_near_duplicates": skipped_near}
+        except Exception as exc:
+            return {"inserted": 0, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Pasted transactions (copy/paste from bank website between statements)
+    # ------------------------------------------------------------------
+
+    def preview_pasted_transactions(self, text: str) -> dict:
+        from budgetapp.core.paste_parser import parse_pasted_text
+        try:
+            rows = parse_pasted_text(text)
+            return {"count": len(rows), "transactions": rows}
+        except Exception as exc:
+            return {"count": 0, "transactions": [], "error": str(exc)}
+
+    def import_pasted_transactions(self, text: str, account_id: str) -> dict:
+        from budgetapp.core.paste_parser import parse_pasted_text, to_dataframe
+        if not account_id:
+            return {"inserted": 0, "error": "Account is required"}
+        try:
+            rows = parse_pasted_text(text)
+            if not rows:
+                return {"inserted": 0, "error": "Nothing recognizable was found in the pasted text."}
+
+            # Filter out rows that already exist as a near-duplicate (same account
+            # + date + amount, fuzzy description). This catches pending-vs-posted
+            # cases where the description shifts slightly between paste and PDF.
+            kept_rows = []
+            skipped_near = 0
+            for r in rows:
+                if self._repo.find_existing_near_match(account_id, r["date"], r["amount"], r["description"]):
+                    skipped_near += 1
+                    continue
+                kept_rows.append(r)
+
+            if not kept_rows:
+                return {"inserted": 0, "parsed": len(rows), "skipped_near_duplicates": skipped_near}
+
+            df = to_dataframe(kept_rows)
+            df["account_id"] = account_id
+            df = categorize(df, self._repo,
+                            use_ai=bool(os.environ.get("ANTHROPIC_API_KEY")))
+            inserted = self._repo.upsert_transactions(df)
+            self._repo.log_import(
+                account_id=account_id,
+                filename=f"Pasted ({len(rows)} txn{'s' if len(rows) != 1 else ''})",
+                inserted=inserted,
+            )
+            return {
+                "inserted": inserted,
+                "parsed": len(rows),
+                "skipped_near_duplicates": skipped_near,
+            }
         except Exception as exc:
             return {"inserted": 0, "error": str(exc)}
 
@@ -624,6 +744,13 @@ class Api:
     def save_rule(self, pattern: str, category_id: str) -> dict:
         return self._repo.create_rule(pattern, category_id)
 
+    def update_rule(self, rule_id: int, pattern: str, category_id: str) -> dict:
+        try:
+            result = self._repo.update_rule(int(rule_id), pattern, category_id)
+            return {"ok": True, **result}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def delete_rule(self, rule_id: int) -> None:
         self._repo.delete_rule(rule_id)
 
@@ -722,7 +849,9 @@ class Api:
     def save_asset(self, asset: dict) -> None:
         import re
         a_id = asset.get("id") or re.sub(r'[^a-z0-9]+', '_', asset["name"].lower()).strip('_')[:40]
-        self._repo.upsert_asset(a_id, asset["name"], asset.get("value", "0"), asset.get("asset_type", "other"))
+        # Normalize "19,470.84" / "$19,470.84" → "19470.84" so Decimal() can read it later
+        clean_value = str(_to_float(asset.get("value", "0")))
+        self._repo.upsert_asset(a_id, asset["name"], clean_value, asset.get("asset_type", "other"))
 
     def delete_asset(self, asset_id: str) -> None:
         self._repo.delete_asset(asset_id)
@@ -741,6 +870,88 @@ class Api:
 
     def detect_recurring(self) -> list[dict]:
         return self._repo.detect_recurring()
+
+    def get_recurring_excluded(self) -> list[dict]:
+        return self._repo.get_recurring_excluded()
+
+    def exclude_recurring(self, description: str) -> dict:
+        return self._repo.exclude_recurring(description)
+
+    def unexclude_recurring(self, normalized_description: str) -> dict:
+        try:
+            self._repo.unexclude_recurring(normalized_description)
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def get_manual_recurring(self) -> list[dict]:
+        return self._repo.get_manual_recurring()
+
+    def add_manual_recurring(
+        self, label: str, amount: str, day_of_month, interval_months,
+        start_date: str, category_id: str,
+        frequency: str = "monthly", second_day_of_month=None,
+    ) -> dict:
+        try:
+            day = int(day_of_month)
+            if not (1 <= day <= 31):
+                return {"ok": False, "error": "Day must be between 1 and 31"}
+            interval = int(interval_months) if interval_months else 1
+            if interval < 1:
+                interval = 1
+            if not label.strip():
+                return {"ok": False, "error": "Label is required"}
+            if not start_date:
+                from datetime import date
+                start_date = date.today().isoformat()
+
+            freq = (frequency or "monthly").lower()
+            if freq not in ("monthly", "biweekly", "semimonthly"):
+                freq = "monthly"
+
+            second_day = None
+            if freq == "semimonthly":
+                try:
+                    second_day = int(second_day_of_month) if second_day_of_month else None
+                except (ValueError, TypeError):
+                    second_day = None
+                if second_day is None or not (1 <= second_day <= 31):
+                    return {"ok": False, "error": "Second day must be between 1 and 31 for semi-monthly"}
+
+            # Normalize amount: bridge already cleans currency, but preserve sign
+            clean_amount: str | None
+            if amount in (None, "", "0"):
+                clean_amount = None
+            else:
+                clean_amount = str(_to_float(amount))
+
+            result = self._repo.add_manual_recurring(
+                label=label.strip(),
+                amount=clean_amount,
+                day_of_month=day,
+                interval_months=interval,
+                start_date=start_date,
+                category_id=category_id or None,
+                frequency=freq,
+                second_day_of_month=second_day,
+            )
+            return {"ok": True, "id": result["id"]}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def delete_manual_recurring(self, recurring_id: str) -> dict:
+        try:
+            self._repo.delete_manual_recurring(recurring_id)
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def get_upcoming_scheduled(self, days_ahead: str = "60") -> list[dict]:
+        try:
+            days = int(days_ahead)
+        except (ValueError, TypeError):
+            days = 60
+        return self._repo.get_upcoming_scheduled(days)
 
     # ------------------------------------------------------------------
     # Upcoming bills
@@ -843,16 +1054,33 @@ class Api:
             else:
                 proj = last
 
-            # Add all occurrences within this month
+            # Add all occurrences within this month — income gets its own
+            # source so the UI can color paydays green and skip them in totals.
+            rec_source = "recurring" if r.get("is_expense", True) else "income"
             while proj <= month_end:
                 if proj >= month_start:
                     scheduled.append({
                         "day": proj.day,
                         "label": r["description"],
                         "amount": r["avg_amount"],
-                        "source": "recurring",
+                        "source": rec_source,
                     })
                 proj += timedelta(days=interval_days)
+
+        # Manual recurring entries — amount sign distinguishes income from expense
+        for rec in self._repo.get_manual_recurring():
+            try:
+                amt_val = float(rec.get("amount") or 0)
+            except (ValueError, TypeError):
+                amt_val = 0
+            src = "income" if amt_val > 0 else "manual"
+            for occ in self._repo._project_manual_occurrences(rec, month_start, month_end):
+                scheduled.append({
+                    "day": occ.day,
+                    "label": rec["label"],
+                    "amount": rec.get("amount"),
+                    "source": src,
+                })
 
         return {"transactions": tx_list, "scheduled": scheduled}
 
@@ -940,9 +1168,9 @@ class Api:
                 lines.append("## Debts")
                 for d in debts:
                     parts = [f"- {d['name']}"]
-                    if d.get("balance"): parts.append(f"balance ${float(d['balance']):,.2f}")
+                    if d.get("balance"): parts.append(f"balance ${_to_float(d['balance']):,.2f}")
                     if d.get("apr"):     parts.append(f"{d['apr']}% APR")
-                    if d.get("minimum"): parts.append(f"${float(d['minimum']):,.2f}/mo minimum")
+                    if d.get("minimum"): parts.append(f"${_to_float(d['minimum']):,.2f}/mo minimum")
                     lines.append("  ".join(parts))
                 lines.append("")
 
@@ -950,8 +1178,8 @@ class Api:
             if net_worth:
                 assets   = net_worth.get("assets", [])
                 accounts = net_worth.get("accounts", [])
-                total_assets = sum(float(a.get("value", 0)) for a in assets)
-                total_acct   = sum(float(a.get("balance", 0)) for a in accounts if a.get("balance"))
+                total_assets = sum(_to_float(a.get("value", 0)) for a in assets)
+                total_acct   = sum(_to_float(a.get("balance", 0)) for a in accounts if a.get("balance"))
                 lines.append("## Net Worth")
                 lines.append(f"Total (assets + account balances): ${total_assets + total_acct:,.2f}")
                 lines.append("")
@@ -983,11 +1211,11 @@ class Api:
             if trackers:
                 lines.append("## Savings Trackers")
                 for t in trackers:
-                    bal = float(t.get("balance") or 0)
+                    bal = _to_float(t.get("balance"))
                     goal = t.get("goal_amount")
                     entry = f"- {t['name']}: ${bal:,.2f}"
                     if goal:
-                        entry += f" / ${float(goal):,.2f} goal"
+                        entry += f" / ${_to_float(goal):,.2f} goal"
                     lines.append(entry)
 
             system_prompt = "\n".join(lines)

@@ -28,6 +28,7 @@ export interface Transaction {
 
 export interface ImportResult {
   inserted: number
+  skipped_near_duplicates?: number
   cancelled?: boolean
   error?: string
 }
@@ -50,6 +51,8 @@ export interface SavingsTracker {
   category_id: string | null
   goal_amount: string | null
   monthly_contribution: string | null
+  /** Categories that DEDUCT from this tracker (envelope-style spending). */
+  spend_categories?: string[]
 }
 
 export interface TimelinePoint {
@@ -206,12 +209,34 @@ export interface ScheduledItem {
   day: number
   label: string
   amount: string | number | null
-  source: 'debt' | 'recurring'
+  source: 'debt' | 'recurring' | 'manual' | 'income'
 }
 
 export interface CalendarData {
   transactions: CalendarTx[]
   scheduled: ScheduledItem[]
+}
+
+export interface UpcomingScheduledItem {
+  date: string
+  label: string
+  amount: string | number | null
+  source: 'debt' | 'recurring' | 'manual' | 'income'
+  id: string | null
+}
+
+export interface ManualRecurring {
+  id: string
+  label: string
+  amount: string | null
+  day_of_month: number
+  interval_months: number
+  start_date: string
+  category_id: string | null
+  category_name: string | null
+  created_at: string
+  frequency?: 'monthly' | 'biweekly' | 'semimonthly'
+  second_day_of_month?: number | null
 }
 
 export interface Split {

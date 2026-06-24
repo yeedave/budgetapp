@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { Transaction, Category, Account } from '../types'
 import HelpTooltip from './HelpTooltip'
-import { createSplit, countTransactionsRange, deleteTransactionsRange, findDuplicateTransactions, deleteTransactionsByIds, recategorizeTransactions, aiCategorizeTransactions } from '../api'
+import { createSplit, countTransactionsRange, deleteTransactionsRange, findDuplicateTransactions, deleteTransactionsByIds, recategorizeTransactions, aiCategorizeTransactions, flipTransactionSign } from '../api'
 
 type SortColumn = 'date' | 'description' | 'amount' | 'account' | 'category'
 type SortDir = 'asc' | 'desc'
@@ -104,6 +104,27 @@ export default function TransactionTable({
   const [organizing, setOrganizing] = useState<string | null>(null)
   const [organizeStatus, setOrganizeStatus] = useState<{ type: 'ok' | 'error'; msg: string } | null>(null)
 
+
+  // Search / filter
+  const [searchQuery, setSearchQuery] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+        e.preventDefault()
+        searchRef.current?.focus()
+        searchRef.current?.select()
+      }
+      if (e.key === 'Escape' && document.activeElement === searchRef.current) {
+        setSearchQuery('')
+        searchRef.current?.blur()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   // Re-query preview count whenever the range/account inputs change
   useEffect(() => {
     setBulkCount(null)
@@ -183,6 +204,7 @@ export default function TransactionTable({
   }
 
   const catName = Object.fromEntries(categories.map((c) => [c.id, c.name]))
+  const accountName = Object.fromEntries(accounts.map((a) => [a.id, a.name]))
 
   const sortedTransactions = [...transactions].sort((a, b) => {
     let cmp = 0
@@ -200,6 +222,16 @@ export default function TransactionTable({
     }
     return sort.dir === 'asc' ? cmp : -cmp
   })
+
+  const q = searchQuery.trim().toLowerCase()
+  const visibleTransactions = q
+    ? sortedTransactions.filter((tx) =>
+        tx.description.toLowerCase().includes(q) ||
+        tx.amount.includes(q) ||
+        (tx.category_id && (catName[tx.category_id] ?? '').toLowerCase().includes(q)) ||
+        (accountName[tx.account_id] ?? '').toLowerCase().includes(q)
+      )
+    : sortedTransactions
 
   async function handleSaveAmount(tx: Transaction) {
     const raw = editingAmountVal.replace(/[^0-9.]/g, '')
@@ -228,12 +260,18 @@ export default function TransactionTable({
     setSplitSuccess(null)
   }
 
+  async function handleFlipSign(tx: Transaction) {
+    await flipTransactionSign(tx.id)
+    onRefreshTransactions()
+  }
+
   async function handleSubmitSplit(tx: Transaction) {
     if (!splitOwedBy.trim() || !splitAmount) return
     setSplitSaving(true)
     await createSplit(tx.id, tx.description, splitOwedBy.trim(), splitAmount)
     setSplitSuccess(tx.id)
     setSplitSaving(false)
+    onRefreshTransactions()
     setTimeout(() => {
       setSplitSuccess(null)
       setSplitOpen(null)
@@ -246,7 +284,31 @@ export default function TransactionTable({
     <div className="flex flex-col h-full">
       {/* Toolbar */}
       <div className="px-4 py-2 border-b bg-white flex items-center gap-2 justify-between shrink-0">
-        <span className="text-xs text-gray-400">{transactions.length} transaction{transactions.length !== 1 ? 's' : ''}</span>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs text-gray-400">
+            {q ? `${visibleTransactions.length} of ${transactions.length}` : `${transactions.length}`}
+            {' '}transaction{transactions.length !== 1 ? 's' : ''}
+          </span>
+          <div className="relative">
+            <input
+              ref={searchRef}
+              type="text"
+              placeholder="Search… (⌘F)"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') { setSearchQuery(''); e.currentTarget.blur() } }}
+              className="pl-2 pr-6 py-1 text-xs border rounded w-44 focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-700 placeholder-gray-300"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => { setSearchQuery(''); searchRef.current?.focus() }}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-600 text-xs leading-none"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => { setShowDuplicates((v) => !v); setDupGroups(null); setDupStatus(null) }}
@@ -538,6 +600,10 @@ export default function TransactionTable({
           <div className="flex items-center justify-center h-64 text-gray-400 text-sm">
             No transactions. Import a statement or add one manually.
           </div>
+        ) : visibleTransactions.length === 0 ? (
+          <div className="flex items-center justify-center h-64 text-gray-400 text-sm">
+            No transactions match "{searchQuery}"
+          </div>
         ) : (
           <table className="w-full text-sm border-collapse">
             <thead className="sticky top-0 z-10">
@@ -570,10 +636,11 @@ export default function TransactionTable({
                 </th>
                 <th className="px-4 py-3 w-8" />
                 <th className="px-4 py-3 w-8" />
+                <th className="px-4 py-3 w-8" />
               </tr>
             </thead>
             <tbody>
-              {sortedTransactions.map((tx) => {
+              {visibleTransactions.map((tx) => {
                 const { text, negative } = formatAmount(tx.amount)
                 const isSplitOpen = splitOpen === tx.id
                 const isSuccess = splitSuccess === tx.id
@@ -640,6 +707,15 @@ export default function TransactionTable({
                       </td>
                       <td className="px-2 py-2.5">
                         <button
+                          onClick={() => handleFlipSign(tx)}
+                          className={`text-sm transition-colors ${negative ? 'text-gray-300 hover:text-green-600' : 'text-gray-300 hover:text-red-500'}`}
+                          title={negative ? 'This is an expense — flip to income' : 'This is income — flip to expense'}
+                        >
+                          ⇅
+                        </button>
+                      </td>
+                      <td className="px-2 py-2.5">
+                        <button
                           onClick={() => isSplitOpen ? setSplitOpen(null) : openSplit(tx.id)}
                           className={`text-sm transition-colors ${isSplitOpen ? 'text-green-600' : 'text-gray-300 hover:text-green-600'}`}
                           title="Split this transaction"
@@ -659,7 +735,7 @@ export default function TransactionTable({
                     </tr>
                     {isSplitOpen && (
                       <tr key={`split-${tx.id}`} className="bg-green-50 border-b">
-                        <td colSpan={7} className="px-4 py-2">
+                        <td colSpan={8} className="px-4 py-2">
                           {isSuccess ? (
                             <span className="text-sm text-green-600 font-medium">Split recorded!</span>
                           ) : (

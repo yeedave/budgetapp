@@ -16,6 +16,16 @@ def _tx_id(date: str, description: str, amount: str, account_id: str, seq: int =
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
+def _desc_similar(a: str, b: str) -> bool:
+    """Fuzzy description match — same after case-fold, or one is a prefix of the other
+    (min 5 chars). Catches "H Mart" vs "h mart" and "H Mart" vs "H Mart Chicago IL"."""
+    a, b = (a or "").lower().strip(), (b or "").lower().strip()
+    if a == b:
+        return True
+    short, long = (a, b) if len(a) <= len(b) else (b, a)
+    return len(short) >= 5 and long.startswith(short)
+
+
 class Repository:
     def __init__(self, db_path: Path):
         self._db_path = db_path
@@ -33,6 +43,42 @@ class Repository:
     # ------------------------------------------------------------------
     # Transactions
     # ------------------------------------------------------------------
+
+    def find_existing_near_match(self, account_id: str, date_str: str,
+                                  amount_str: str, description: str,
+                                  date_window_days: int = 3) -> dict | None:
+        """Return a near-duplicate existing transaction if one is found, else None.
+
+        Match policy: same account, same amount, date within ±N days, and a fuzzy
+        description match (case-insensitive equality or prefix). The ±N-day window
+        catches the pending-vs-posted case where you pasted a pending transaction
+        with today's date and the statement later posts it 1-2 days later. The
+        amount-equality requirement prevents false collapses across different
+        transactions for the same merchant."""
+        from datetime import date, timedelta
+        try:
+            target = date.fromisoformat(date_str)
+        except Exception:
+            target = None
+        if target is None or date_window_days <= 0:
+            # Exact-date match only
+            rows = self.conn.execute(
+                """SELECT id, description, amount, date FROM transactions
+                   WHERE account_id = ? AND date = ? AND amount = ?""",
+                (account_id, date_str, amount_str),
+            ).fetchall()
+        else:
+            lo = (target - timedelta(days=date_window_days)).isoformat()
+            hi = (target + timedelta(days=date_window_days)).isoformat()
+            rows = self.conn.execute(
+                """SELECT id, description, amount, date FROM transactions
+                   WHERE account_id = ? AND amount = ? AND date BETWEEN ? AND ?""",
+                (account_id, amount_str, lo, hi),
+            ).fetchall()
+        for r in rows:
+            if _desc_similar(r["description"], description):
+                return {"id": r["id"], "description": r["description"], "date": r["date"]}
+        return None
 
     def upsert_transactions(self, df: pd.DataFrame, user: str = "dave") -> int:
         """Insert parsed DataFrame rows; skip duplicates. Returns count inserted."""
@@ -126,6 +172,31 @@ class Repository:
         )
         self.conn.commit()
 
+    def flip_transaction_sign(self, tx_id: str) -> None:
+        """Flip an income transaction to an expense (or vice versa) by negating
+        its amount. If the transaction is linked to a debt or savings tracker via
+        its category, the balance is adjusted to stay consistent."""
+        row = self.conn.execute(
+            "SELECT amount, category_id, account_id FROM transactions WHERE id = ?", (tx_id,)
+        ).fetchone()
+        if not row:
+            return
+        old_amount = Decimal(row["amount"])
+        new_amount = -old_amount
+        self.conn.execute(
+            "UPDATE transactions SET amount = ? WHERE id = ?",
+            (str(new_amount), tx_id),
+        )
+        if row["category_id"]:
+            acc = self.conn.execute(
+                "SELECT account_type FROM accounts WHERE id = ?", (row["account_id"],)
+            ).fetchone()
+            from_sav = bool(acc and acc["account_type"] == "savings")
+            # delta = new - old = -2*old; this both reverses the original adjustment
+            # and applies the new one in a single call
+            self._adjust_linked_balance(row["category_id"], new_amount - old_amount, from_sav)
+        self.conn.commit()
+
     def set_category(self, tx_id: str, category_id: str) -> list[str]:
         """Set category on one transaction, auto-apply rule to matching uncategorized ones.
         Returns list of all tx_ids updated."""
@@ -176,6 +247,22 @@ class Repository:
             new_bal = max(Decimal("0"), Decimal(debt["balance"]) + amount)
             self.conn.execute("UPDATE debts SET balance = ? WHERE id = ?",
                               (str(new_bal), debt["id"]))
+
+        # Envelope spending: if this category is in the spend list of any tracker,
+        # add the transaction amount directly to the tracker balance. For an
+        # expense (amount < 0) this decreases the envelope; a refund (amount > 0)
+        # increases it.
+        spend_links = self.conn.execute(
+            """SELECT t.id, t.balance
+               FROM savings_trackers t
+               JOIN savings_tracker_spend_categories l ON l.tracker_id = t.id
+               WHERE l.category_id = ?""",
+            (category_id,),
+        ).fetchall()
+        for s in spend_links:
+            new_bal = Decimal(s["balance"] or "0") + amount
+            self.conn.execute("UPDATE savings_trackers SET balance = ? WHERE id = ?",
+                              (str(new_bal), s["id"]))
 
         savs = self.conn.execute(
             "SELECT id, balance, monthly_contribution FROM savings_trackers WHERE category_id = ?",
@@ -250,11 +337,29 @@ class Repository:
         self.conn.commit()
 
     def delete_category(self, cat_id: str) -> None:
+        # Block deletion only if real transactions still reference the category —
+        # that's the case where data loss would be visible to the user.
         in_use = self.conn.execute(
             "SELECT COUNT(*) FROM transactions WHERE category_id = ?", (cat_id,)
         ).fetchone()[0]
         if in_use:
             raise ValueError(f"Cannot delete: {in_use} transaction(s) still use this category.")
+
+        # Clean up secondary references that would otherwise trip FK constraints.
+        # Rules and budget-bucket links are safe to drop — they're configuration,
+        # not user data. Debt / savings tracker / manual_recurring links can be
+        # nulled out without losing the underlying entity.
+        self.conn.execute("DELETE FROM categorization_rules WHERE category_id = ?", (cat_id,))
+        self.conn.execute("DELETE FROM budget_bucket_categories WHERE category_id = ?", (cat_id,))
+        self.conn.execute("DELETE FROM savings_tracker_spend_categories WHERE category_id = ?", (cat_id,))
+        self.conn.execute("UPDATE debts SET category_id = NULL WHERE category_id = ?", (cat_id,))
+        self.conn.execute("UPDATE savings_trackers SET category_id = NULL WHERE category_id = ?", (cat_id,))
+        # manual_recurring may not exist on older installs — guard with try/except.
+        try:
+            self.conn.execute("UPDATE manual_recurring SET category_id = NULL WHERE category_id = ?", (cat_id,))
+        except Exception:
+            pass
+
         self.conn.execute("DELETE FROM categories WHERE id = ?", (cat_id,))
         self.conn.commit()
 
@@ -292,6 +397,14 @@ class Repository:
         self.conn.commit()
         return {"id": cursor.lastrowid, "pattern": pattern,
                 "category_id": category_id, "priority": priority}
+
+    def update_rule(self, rule_id: int, pattern: str, category_id: str) -> dict:
+        self.conn.execute(
+            "UPDATE categorization_rules SET pattern = ?, category_id = ? WHERE id = ?",
+            (pattern, category_id, rule_id),
+        )
+        self.conn.commit()
+        return {"id": rule_id, "pattern": pattern, "category_id": category_id}
 
     def delete_rule(self, rule_id: int) -> None:
         self.conn.execute("DELETE FROM categorization_rules WHERE id = ?", (rule_id,))
@@ -380,17 +493,36 @@ class Repository:
     ) -> Transaction:
         from datetime import date as date_type
         tx_id = _tx_id(date_str, description, amount_str, account_id)
-        self.conn.execute(
+        cur = self.conn.execute(
             """INSERT OR IGNORE INTO transactions
                (id, date, description, raw_description, amount, account_id, category_id, user, is_manual)
                VALUES (?,?,?,?,?,?,?,?,1)""",
             (tx_id, date_str, description, description, amount_str, account_id, category_id or None, "dave"),
         )
+        # Fire balance adjustments if this was a fresh insert with a category
+        # (debt link, savings contribution, or envelope spend category).
+        if cur.rowcount > 0 and category_id:
+            acc = self.conn.execute(
+                "SELECT account_type FROM accounts WHERE id = ?", (account_id,)
+            ).fetchone()
+            from_sav = bool(acc and acc["account_type"] == "savings")
+            self._adjust_linked_balance(category_id, Decimal(amount_str), from_sav)
         self.conn.commit()
         row = self.conn.execute("SELECT * FROM transactions WHERE id = ?", (tx_id,)).fetchone()
         return self._row_to_transaction(row)
 
     def delete_transaction(self, tx_id: str) -> None:
+        # Reverse any linked-balance adjustment before deleting so debts and
+        # envelope trackers stay in sync.
+        row = self.conn.execute(
+            """SELECT t.amount, t.category_id, a.account_type
+               FROM transactions t LEFT JOIN accounts a ON t.account_id = a.id
+               WHERE t.id = ?""",
+            (tx_id,),
+        ).fetchone()
+        if row and row["category_id"]:
+            from_sav = bool(row["account_type"] == "savings")
+            self._adjust_linked_balance(row["category_id"], -Decimal(row["amount"]), from_sav)
         self.conn.execute("DELETE FROM transactions WHERE id = ?", (tx_id,))
         self.conn.commit()
 
@@ -410,15 +542,6 @@ class Repository:
                ) dup ON t.date = dup.date AND t.amount = dup.amount
                ORDER BY t.date, t.amount, t.rowid"""
         ).fetchall()
-
-        def _desc_similar(a: str, b: str) -> bool:
-            a, b = a.lower().strip(), b.lower().strip()
-            if a == b:
-                return True
-            # One description is a prefix of the other (min 5 chars to avoid
-            # false positives on short strings like "ACH" or "ATM").
-            short, long = (a, b) if len(a) <= len(b) else (b, a)
-            return len(short) >= 5 and long.startswith(short)
 
         from collections import defaultdict
         by_date_amount: dict[tuple, list[dict]] = defaultdict(list)
@@ -550,7 +673,29 @@ class Repository:
 
     def get_savings_trackers(self) -> list[dict]:
         rows = self.conn.execute("SELECT * FROM savings_trackers ORDER BY name").fetchall()
-        return [{k: r[k] for k in r.keys()} for r in rows]
+        result = []
+        for r in rows:
+            entry = {k: r[k] for k in r.keys()}
+            spends = self.conn.execute(
+                "SELECT category_id FROM savings_tracker_spend_categories WHERE tracker_id = ?",
+                (entry["id"],),
+            ).fetchall()
+            entry["spend_categories"] = [s["category_id"] for s in spends]
+            result.append(entry)
+        return result
+
+    def set_tracker_spend_categories(self, tracker_id: str, category_ids: list[str]) -> None:
+        self.conn.execute(
+            "DELETE FROM savings_tracker_spend_categories WHERE tracker_id = ?",
+            (tracker_id,),
+        )
+        for cid in category_ids:
+            if cid:
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO savings_tracker_spend_categories (tracker_id, category_id) VALUES (?, ?)",
+                    (tracker_id, cid),
+                )
+        self.conn.commit()
 
     def upsert_savings_tracker(
         self, id: str, name: str, balance: str, category_id: str | None,
@@ -568,6 +713,7 @@ class Repository:
         self.conn.commit()
 
     def delete_savings_tracker(self, id: str) -> None:
+        self.conn.execute("DELETE FROM savings_tracker_spend_categories WHERE tracker_id = ?", (id,))
         self.conn.execute("DELETE FROM savings_trackers WHERE id = ?", (id,))
         self.conn.commit()
 
@@ -674,17 +820,82 @@ class Repository:
         ).fetchall()
         return [{k: r[k] for k in r.keys()} for r in rows]
 
+    _SPLIT_CATEGORY_ID = "transfer_split_owed"
+
+    def _ensure_split_category(self) -> str:
+        """Ensure the special "Split — Owed by Others" category exists in the
+        Transfers bucket. Returns its id. Putting it in Transfers means the owed
+        portion is excluded from your income/expense totals automatically."""
+        existing = self.conn.execute(
+            "SELECT id FROM categories WHERE id = ?", (self._SPLIT_CATEGORY_ID,)
+        ).fetchone()
+        if existing:
+            return self._SPLIT_CATEGORY_ID
+        self.conn.execute(
+            "INSERT INTO categories (id, name, bucket, owner, budget_amount) VALUES (?,?,?,?,?)",
+            (self._SPLIT_CATEGORY_ID, "Split — Owed by Others", "transfers", "shared", None),
+        )
+        self.conn.commit()
+        return self._SPLIT_CATEGORY_ID
+
     def create_split(self, tx_id: str, description: str, owed_by: str, amount_owed: str) -> dict:
+        """Splits the original transaction into two:
+          1. Original keeps the portion you actually owe (amount reduced by amount_owed)
+          2. A new transaction representing the portion someone else owes you,
+             tagged with the Transfers/Split category so it doesn't count as
+             your own spending.
+        """
         import uuid
         from datetime import datetime
+        from decimal import Decimal
+
+        orig = self.conn.execute(
+            "SELECT * FROM transactions WHERE id = ?", (tx_id,)
+        ).fetchone()
+        if not orig:
+            raise ValueError("Original transaction not found")
+
+        orig_amount = Decimal(orig["amount"])
+        owed = Decimal(amount_owed)
+        if owed <= 0:
+            raise ValueError("Amount owed must be greater than zero")
+        if abs(owed) >= abs(orig_amount):
+            raise ValueError(f"Amount owed ({owed}) must be less than the transaction amount ({abs(orig_amount)})")
+
+        # Reduce original by the owed portion. Original keeps its sign (expense stays negative).
+        sign = Decimal(-1) if orig_amount < 0 else Decimal(1)
+        owed_signed = sign * owed
+        new_orig_amount = orig_amount - owed_signed   # e.g. -100 - (-40) = -60
+
+        split_cat = self._ensure_split_category()
+        split_desc = f"Owed by {owed_by} — {orig['description']}"
+
+        # Generate a deterministic tx id that won't clash with the original
+        new_tx_id = _tx_id(orig["date"], split_desc, str(owed_signed), orig["account_id"], 0)
+
+        # Update original and insert the new "owed" tx in one go
+        self.conn.execute(
+            "UPDATE transactions SET amount = ? WHERE id = ?",
+            (str(new_orig_amount), tx_id),
+        )
+        self.conn.execute(
+            """INSERT OR IGNORE INTO transactions
+               (id, date, description, raw_description, amount, account_id, category_id, user, is_manual)
+               VALUES (?,?,?,?,?,?,?,?,1)""",
+            (new_tx_id, orig["date"], split_desc, split_desc, str(owed_signed),
+             orig["account_id"], split_cat, orig["user"]),
+        )
+
         split_id = str(uuid.uuid4())[:16]
         now = datetime.now().isoformat()
         self.conn.execute(
-            """INSERT INTO splits (id, tx_id, description, owed_by, amount_owed, status, created_at)
-               VALUES (?,?,?,?,?,'pending',?)""",
-            (split_id, tx_id, description, owed_by, amount_owed, now),
+            """INSERT INTO splits (id, tx_id, description, owed_by, amount_owed,
+                                    status, created_at, split_tx_id)
+               VALUES (?,?,?,?,?,'pending',?,?)""",
+            (split_id, tx_id, description, owed_by, amount_owed, now, new_tx_id),
         )
         self.conn.commit()
+
         row = self.conn.execute(
             """SELECT s.*, t.date, t.description AS tx_description, t.amount AS tx_amount
                FROM splits s LEFT JOIN transactions t ON s.tx_id = t.id
@@ -698,6 +909,27 @@ class Repository:
         self.conn.commit()
 
     def delete_split(self, split_id: str) -> None:
+        """Reverse the split: restore the original transaction's amount, delete the
+        "owed by" transaction we created, then delete the split record."""
+        from decimal import Decimal
+        row = self.conn.execute(
+            "SELECT tx_id, split_tx_id, amount_owed FROM splits WHERE id = ?", (split_id,)
+        ).fetchone()
+        if row and row["split_tx_id"]:
+            owed_tx = self.conn.execute(
+                "SELECT amount FROM transactions WHERE id = ?", (row["split_tx_id"],)
+            ).fetchone()
+            orig_tx = self.conn.execute(
+                "SELECT amount FROM transactions WHERE id = ?", (row["tx_id"],)
+            ).fetchone()
+            if owed_tx and orig_tx:
+                # Restore original by adding the owed portion back (with its sign).
+                restored = Decimal(orig_tx["amount"]) + Decimal(owed_tx["amount"])
+                self.conn.execute(
+                    "UPDATE transactions SET amount = ? WHERE id = ?",
+                    (str(restored), row["tx_id"]),
+                )
+            self.conn.execute("DELETE FROM transactions WHERE id = ?", (row["split_tx_id"],))
         self.conn.execute("DELETE FROM splits WHERE id = ?", (split_id,))
         self.conn.commit()
 
@@ -744,8 +976,244 @@ class Repository:
     # Recurring detection
     # ------------------------------------------------------------------
 
-    def detect_recurring(self) -> list[dict]:
+    @staticmethod
+    def _normalize_desc(desc: str) -> str:
         import re
+        d = desc.lower()
+        d = re.sub(r'\b\d{4,}\b', '', d)
+        d = re.sub(r'[^a-z\s]', ' ', d)
+        return re.sub(r'\s+', ' ', d).strip()
+
+    def get_recurring_excluded(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT normalized_description, sample_description, excluded_at "
+            "FROM recurring_excluded ORDER BY excluded_at DESC"
+        ).fetchall()
+        return [{k: r[k] for k in r.keys()} for r in rows]
+
+    def exclude_recurring(self, description: str) -> dict:
+        from datetime import datetime
+        norm = self._normalize_desc(description)
+        if not norm:
+            return {"ok": False, "error": "empty description"}
+        self.conn.execute(
+            "INSERT OR REPLACE INTO recurring_excluded "
+            "(normalized_description, sample_description, excluded_at) VALUES (?, ?, ?)",
+            (norm, description, datetime.now().isoformat()),
+        )
+        self.conn.commit()
+        return {"ok": True, "normalized_description": norm}
+
+    def unexclude_recurring(self, normalized_description: str) -> None:
+        self.conn.execute(
+            "DELETE FROM recurring_excluded WHERE normalized_description = ?",
+            (normalized_description,),
+        )
+        self.conn.commit()
+
+    # ------------------------------------------------------------------
+    # Manual recurring payments (user-added)
+    # ------------------------------------------------------------------
+
+    def get_manual_recurring(self) -> list[dict]:
+        rows = self.conn.execute(
+            """SELECT mr.id, mr.label, mr.amount, mr.day_of_month, mr.interval_months,
+                      mr.start_date, mr.category_id, mr.created_at,
+                      mr.frequency, mr.second_day_of_month,
+                      c.name AS category_name
+               FROM manual_recurring mr
+               LEFT JOIN categories c ON mr.category_id = c.id
+               ORDER BY mr.day_of_month, mr.label"""
+        ).fetchall()
+        return [{k: r[k] for k in r.keys()} for r in rows]
+
+    def add_manual_recurring(
+        self, label: str, amount: str | None, day_of_month: int,
+        interval_months: int, start_date: str, category_id: str | None,
+        frequency: str = 'monthly', second_day_of_month: int | None = None,
+    ) -> dict:
+        import uuid
+        from datetime import datetime
+        rid = uuid.uuid4().hex[:12]
+        self.conn.execute(
+            """INSERT INTO manual_recurring
+               (id, label, amount, day_of_month, interval_months, start_date,
+                category_id, created_at, frequency, second_day_of_month)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (rid, label, amount, day_of_month, interval_months, start_date,
+             category_id, datetime.now().isoformat(),
+             frequency or 'monthly', second_day_of_month),
+        )
+        self.conn.commit()
+        return {"id": rid}
+
+    def delete_manual_recurring(self, recurring_id: str) -> None:
+        self.conn.execute("DELETE FROM manual_recurring WHERE id = ?", (recurring_id,))
+        self.conn.commit()
+
+    @staticmethod
+    def _project_manual_occurrences(rec: dict, range_start, range_end) -> list:
+        """Yield each occurrence of a manual_recurring entry inside [range_start, range_end].
+
+        Handles three frequencies:
+          - 'biweekly':   every 14 days starting from start_date
+          - 'semimonthly': two days per month (day_of_month + second_day_of_month)
+          - 'monthly' (default): day_of_month every interval_months
+        """
+        from datetime import date, timedelta
+        import calendar as cal_mod
+        try:
+            start = date.fromisoformat(rec["start_date"])
+        except Exception:
+            return []
+        frequency = (rec.get("frequency") or "monthly").lower()
+
+        # ── Bi-weekly: every 14 days from start_date ─────────────────────
+        if frequency == "biweekly":
+            occ = start
+            # Fast-forward to first occurrence at/after range_start
+            if occ < range_start:
+                delta_days = (range_start - occ).days
+                steps = delta_days // 14
+                occ = occ + timedelta(days=steps * 14)
+                if occ < range_start:
+                    occ += timedelta(days=14)
+            out = []
+            while occ <= range_end:
+                if occ >= start:
+                    out.append(occ)
+                occ += timedelta(days=14)
+            return out
+
+        # ── Semi-monthly: two days per month ─────────────────────────────
+        if frequency == "semimonthly":
+            day_a = int(rec["day_of_month"])
+            day_b = int(rec.get("second_day_of_month") or (day_a + 15))
+            days = sorted({day_a, day_b})
+            out = []
+            y, m = range_start.year, range_start.month
+            while True:
+                last_in_month = cal_mod.monthrange(y, m)[1]
+                for d in days:
+                    actual = min(d, last_in_month)
+                    try:
+                        occ = date(y, m, actual)
+                    except ValueError:
+                        continue
+                    if occ > range_end:
+                        return sorted(set(out))
+                    if occ >= range_start and occ >= start:
+                        out.append(occ)
+                # Step to next month
+                m += 1
+                if m > 12:
+                    m = 1
+                    y += 1
+                if date(y, m, 1) > range_end:
+                    return sorted(set(out))
+
+        # ── Monthly (default): day_of_month every interval_months ────────
+        day = int(rec["day_of_month"])
+        interval = max(1, int(rec.get("interval_months") or 1))
+        y, m = max(start.year, range_start.year), 0
+        if start.year > range_start.year or (start.year == range_start.year and start.month > range_start.month):
+            y, m = start.year, start.month
+        else:
+            y, m = range_start.year, range_start.month
+        months_since_start = (y - start.year) * 12 + (m - start.month)
+        if months_since_start % interval != 0:
+            months_since_start += interval - (months_since_start % interval)
+            y = start.year + (start.month - 1 + months_since_start) // 12
+            m = (start.month - 1 + months_since_start) % 12 + 1
+
+        occurrences = []
+        while True:
+            last_day = cal_mod.monthrange(y, m)[1]
+            actual_day = min(day, last_day)
+            try:
+                occ = date(y, m, actual_day)
+            except ValueError:
+                occ = None
+            if occ:
+                if occ > range_end:
+                    break
+                if occ >= range_start and occ >= start:
+                    occurrences.append(occ)
+            new_idx = (m - 1) + interval
+            y += new_idx // 12
+            m = (new_idx % 12) + 1
+        return occurrences
+
+    def get_upcoming_scheduled(self, days_ahead: int = 60) -> list[dict]:
+        """All scheduled items from today through N days ahead — debts, auto-detected
+        recurring projections, and manual recurring entries — merged and sorted."""
+        from datetime import date, timedelta
+        today = date.today()
+        end = today + timedelta(days=max(1, days_ahead))
+
+        results: list[dict] = []
+
+        # Debt due dates
+        for d in self.get_debts():
+            due_day = d.get("due_day")
+            if not due_day:
+                continue
+            for n in range(0, days_ahead // 28 + 2):
+                month_anchor = (today.replace(day=1) + timedelta(days=32 * n)).replace(day=1)
+                import calendar as cal_mod
+                last_day = cal_mod.monthrange(month_anchor.year, month_anchor.month)[1]
+                day = min(int(due_day), last_day)
+                occ = date(month_anchor.year, month_anchor.month, day)
+                if today <= occ <= end:
+                    results.append({
+                        "date": occ.isoformat(),
+                        "label": d["name"],
+                        "amount": d.get("minimum"),
+                        "source": "debt",
+                        "id": d["id"],
+                    })
+
+        # Auto-detected recurring — separate income from expenses so the UI
+        # can color paydays green and exclude them from cash-needed totals.
+        for r in self.detect_recurring():
+            try:
+                last = date.fromisoformat(r["last_date"])
+            except Exception:
+                continue
+            interval_days = max(1, int(r.get("avg_interval", 30)))
+            proj = last + timedelta(days=interval_days)
+            source = "recurring" if r.get("is_expense", True) else "income"
+            while proj <= end:
+                if proj >= today:
+                    results.append({
+                        "date": proj.isoformat(),
+                        "label": r["description"],
+                        "amount": str(r["avg_amount"]),
+                        "source": source,
+                        "id": None,
+                    })
+                proj += timedelta(days=interval_days)
+
+        # Manual recurring — amount sign determines income vs expense
+        for rec in self.get_manual_recurring():
+            try:
+                amt_val = float(rec.get("amount") or 0)
+            except (ValueError, TypeError):
+                amt_val = 0
+            src = "income" if amt_val > 0 else "manual"
+            for occ in self._project_manual_occurrences(rec, today, end):
+                results.append({
+                    "date": occ.isoformat(),
+                    "label": rec["label"],
+                    "amount": rec.get("amount"),
+                    "source": src,
+                    "id": rec["id"],
+                })
+
+        results.sort(key=lambda r: r["date"])
+        return results
+
+    def detect_recurring(self) -> list[dict]:
         from datetime import date
 
         rows = self.conn.execute(
@@ -755,57 +1223,97 @@ class Repository:
                ORDER BY t.description, t.date"""
         ).fetchall()
 
-        def normalize(desc: str) -> str:
-            d = desc.lower()
-            d = re.sub(r'\b\d{4,}\b', '', d)   # strip long digit runs (card numbers, ids)
-            d = re.sub(r'[^a-z\s]', ' ', d)
-            return re.sub(r'\s+', ' ', d).strip()
+        excluded = {r["normalized_description"] for r in
+                    self.conn.execute("SELECT normalized_description FROM recurring_excluded").fetchall()}
+
+        normalize = self._normalize_desc
 
         from collections import defaultdict
         groups: dict[str, list[tuple]] = defaultdict(list)
+        seen_date_keys: set[tuple] = set()
         for r in rows:
             key = normalize(r["description"])
-            if key:
-                groups[key].append((r["date"], r["amount"], r["description"]))
+            if not key or key in excluded:
+                continue
+            # Dedupe same-date repeats per merchant — common for split payroll deposits
+            # (main + stipend on the same day) which would otherwise yield zero-day
+            # intervals and mislabel a bi-weekly cadence as weekly.
+            dedup_key = (key, r["date"])
+            if dedup_key in seen_date_keys:
+                continue
+            seen_date_keys.add(dedup_key)
+            groups[key].append((r["date"], r["amount"], r["description"]))
+
+        # Keywords that indicate a utility/bill — we accept variable amounts
+        # for these because utility statements legitimately vary month-to-month.
+        # For everything else (groceries, dining, shopping) variable amounts
+        # are not "recurring" — they're just frequent.
+        UTILITY_KEYWORDS = (
+            'edison', 'pge', 'pg&e', 'utility', 'utilities', 'water', 'sewer',
+            'gas company', 'electric', 'spectrum', 'comcast', 'xfinity', 'cox',
+            'verizon', 'at&t', 'tmobile', 't-mobile', 'sprint', 'centurylink',
+            'internet', 'phone bill', 'trash', 'waste', 'cable', 'so cal',
+            # Rent / housing — often varies slightly month-to-month
+            'rent', 'mortgage', 'apartment', 'landlord', 'lease', 'hoa',
+            'domuso', 'avalon', 'equity res', 'greystar', 'realpage',
+        )
 
         results = []
         for key, entries in groups.items():
-            if len(entries) < 2:
+            # Require at least 3 occurrences — 2 can happen by coincidence.
+            if len(entries) < 3:
                 continue
 
             entries.sort(key=lambda x: x[0])
             dates = [e[0] for e in entries]
             amounts = [abs(e[1]) for e in entries]
+            descriptions_blob = " ".join(e[2] for e in entries).lower()
 
-            if len(dates) >= 2:
-                intervals = []
-                for i in range(1, len(dates)):
-                    try:
-                        d1 = date.fromisoformat(dates[i - 1])
-                        d2 = date.fromisoformat(dates[i])
-                        intervals.append((d2 - d1).days)
-                    except Exception:
-                        pass
+            intervals = []
+            for i in range(1, len(dates)):
+                try:
+                    d1 = date.fromisoformat(dates[i - 1])
+                    d2 = date.fromisoformat(dates[i])
+                    intervals.append((d2 - d1).days)
+                except Exception:
+                    pass
+            if not intervals:
+                continue
 
-                if not intervals:
-                    continue
+            # Median interval is robust to one missed/extra payment.
+            sorted_intervals = sorted(intervals)
+            median_interval = sorted_intervals[len(sorted_intervals) // 2]
+            if 5 <= median_interval <= 9:
+                interval_type = "weekly"
+            elif 12 <= median_interval <= 17:
+                interval_type = "biweekly"
+            elif 25 <= median_interval <= 35:
+                interval_type = "monthly"
+            else:
+                continue
 
-                avg_interval = sum(intervals) / len(intervals)
-                is_monthly = 20 <= avg_interval <= 45
-                is_weekly = 5 <= avg_interval <= 9
-
-                if not (is_monthly or is_weekly):
-                    continue
-
+            # Amount-consistency check: a real recurring charge has a stable
+            # amount month after month. Variable amounts only count if the
+            # description looks like a utility/bill.
             avg_amount = sum(amounts) / len(amounts)
+            max_amt, min_amt = max(amounts), min(amounts)
+            spread = max_amt - min_amt
+            relative_spread = spread / avg_amount if avg_amount > 0 else 0
+
+            is_consistent = relative_spread <= 0.10  # within 10% — catches modest fluctuations
+            is_utility = any(kw in descriptions_blob for kw in UTILITY_KEYWORDS)
+
+            if not (is_consistent or is_utility):
+                continue   # variable-amount + non-utility → not a real recurring bill
+
             is_expense = entries[-1][1] < 0
 
             results.append({
                 "description": entries[-1][2],
                 "occurrences": len(entries),
                 "avg_amount": round(avg_amount, 2),
-                "avg_interval": round(avg_interval, 0),
-                "interval_type": "weekly" if is_weekly else "monthly",
+                "avg_interval": round(median_interval, 0),
+                "interval_type": interval_type,
                 "last_date": dates[-1],
                 "is_expense": is_expense,
             })

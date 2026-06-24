@@ -104,6 +104,43 @@ CREATE TABLE IF NOT EXISTS splits (
     settled_tx_id   TEXT,
     created_at      TEXT NOT NULL
 );
+
+-- User-managed list of normalized descriptions that detect_recurring should ignore.
+-- Used when a transaction looks recurring statistically but the user knows it isn't
+-- (e.g. occasional fast food).
+CREATE TABLE IF NOT EXISTS recurring_excluded (
+    normalized_description TEXT PRIMARY KEY,
+    sample_description     TEXT NOT NULL,
+    excluded_at            TEXT NOT NULL
+);
+
+-- Envelope-style spending: categories whose transactions DEDUCT from a savings
+-- tracker. E.g. a "Daughter" tracker funded each paycheck (existing category_id
+-- link adds to balance) plus spend categories like "Diapers", "Kids clothes"
+-- whose expenses pull from the same envelope.
+CREATE TABLE IF NOT EXISTS savings_tracker_spend_categories (
+    tracker_id  TEXT NOT NULL REFERENCES savings_trackers(id),
+    category_id TEXT NOT NULL REFERENCES categories(id),
+    PRIMARY KEY (tracker_id, category_id)
+);
+
+-- User-defined recurring payments that don't yet have transaction history to
+-- auto-detect (e.g. an annual bill, a brand-new subscription, an irregular debt).
+CREATE TABLE IF NOT EXISTS manual_recurring (
+    id                   TEXT PRIMARY KEY,
+    label                TEXT NOT NULL,
+    amount               TEXT,
+    day_of_month         INTEGER NOT NULL,
+    interval_months      INTEGER NOT NULL DEFAULT 1,
+    start_date           TEXT NOT NULL,
+    category_id          TEXT REFERENCES categories(id),
+    created_at           TEXT NOT NULL,
+    -- 'monthly' (default, uses day_of_month + interval_months),
+    -- 'biweekly' (every 14 days from start_date),
+    -- 'semimonthly' (twice a month on day_of_month and second_day_of_month)
+    frequency            TEXT NOT NULL DEFAULT 'monthly',
+    second_day_of_month  INTEGER
+);
 """
 
 _MIGRATIONS = """
@@ -201,8 +238,29 @@ def init_db(db_path: Path) -> sqlite3.Connection:
     _migrate_due_day(conn)
     _migrate_account_customization(conn)
     _migrate_import_log(conn)
+    _migrate_split_tx_id(conn)
+    _migrate_manual_recurring_frequency(conn)
     conn.commit()
     return conn
+
+
+def _migrate_split_tx_id(conn: sqlite3.Connection) -> None:
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(splits)").fetchall()]
+    if "split_tx_id" not in cols:
+        conn.execute("ALTER TABLE splits ADD COLUMN split_tx_id TEXT")
+
+
+def _migrate_manual_recurring_frequency(conn: sqlite3.Connection) -> None:
+    # manual_recurring may not exist on older installs — guard with table check
+    if not conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='manual_recurring'"
+    ).fetchone():
+        return
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(manual_recurring)").fetchall()]
+    if "frequency" not in cols:
+        conn.execute("ALTER TABLE manual_recurring ADD COLUMN frequency TEXT NOT NULL DEFAULT 'monthly'")
+    if "second_day_of_month" not in cols:
+        conn.execute("ALTER TABLE manual_recurring ADD COLUMN second_day_of_month INTEGER")
 
 
 def _seed_if_empty(conn: sqlite3.Connection) -> None:

@@ -31,8 +31,8 @@ function usePywebviewReady() {
 
 const VALID_VIEWS: View[] = ['dashboard', 'transactions', 'debts', 'categories', 'accounts', 'calculator', 'progress', 'splits', 'guide', 'advisor', 'calendar', 'settings']
 
-const PRIMARY_VIEWS: View[] = ['dashboard', 'transactions', 'debts', 'categories', 'accounts', 'progress', 'advisor']
-const MORE_VIEWS: View[] = ['calendar', 'calculator', 'splits', 'guide', 'settings']
+const PRIMARY_VIEWS: View[] = ['dashboard', 'transactions', 'debts', 'categories', 'accounts', 'calendar', 'advisor']
+const MORE_VIEWS: View[] = ['progress', 'calculator', 'splits', 'guide', 'settings']
 const VIEW_LABEL: Record<View, string> = {
   dashboard: 'Dashboard', transactions: 'Transactions', debts: 'Debts',
   categories: 'Categories', accounts: 'Accounts', progress: 'Progress',
@@ -226,6 +226,8 @@ export default function App() {
               transactions={displayedTransactions}
               categories={categories}
               onSetCategory={handleSetCategory}
+              onDeleteTransaction={handleDeleteTransaction}
+              onRefresh={loadTransactions}
             />
           )}
           {view === 'transactions' && (

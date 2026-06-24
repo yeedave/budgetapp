@@ -116,6 +116,14 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
   const debtCategories = categories.filter((c) => c.bucket === 'debts')
   const savingsCategories = categories.filter((c) => c.bucket === 'savings')
 
+  // Highest positive balance across all trackers — used to scale the
+  // progress bar when a tracker has no goal set, so multiple trackers can
+  // be visually compared at a glance.
+  const maxTrackerBalance = Math.max(
+    1,
+    ...savings.map((s) => Math.max(0, parseFloat(s.balance || '0'))),
+  )
+
   useEffect(() => {
     Promise.all([getDebts(), getSavingsTrackers()])
       .then(([debts, savs]) => {
@@ -167,6 +175,18 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
     setSavingsEdits((prev) => ({ ...prev, [id]: { ...prev[id], [field]: value } }))
   }
 
+  const handleToggleSpendCategory = (tracker: SavingsTracker, categoryId: string) => {
+    if (!categoryId) return
+    const current = savingsEdits[tracker.id]?.spend_categories ?? tracker.spend_categories ?? []
+    const next = current.includes(categoryId)
+      ? current.filter((c) => c !== categoryId)
+      : [...current, categoryId]
+    setSavingsEdits((prev) => ({
+      ...prev,
+      [tracker.id]: { ...prev[tracker.id], spend_categories: next },
+    }))
+  }
+
   const handleSaveSavings = async (tracker: SavingsTracker) => {
     const edits = savingsEdits[tracker.id] ?? {}
     const updated: SavingsTracker = { ...tracker, ...edits }
@@ -182,7 +202,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
 
   const handleAddSavings = () => {
     const tempId = `__new_${Date.now()}`
-    const newTracker: SavingsTracker = { id: tempId, name: '', balance: '0', category_id: null, goal_amount: null, monthly_contribution: null }
+    const newTracker: SavingsTracker = { id: tempId, name: '', balance: '0', category_id: null, goal_amount: null, monthly_contribution: null, spend_categories: [] }
     setSavings((prev) => [...prev, newTracker])
     setSavingsEdits((prev) => ({ ...prev, [tempId]: { name: '', balance: '0' } }))
   }
@@ -306,7 +326,7 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">
               Savings
-              <HelpTooltip text="Track savings accounts here. Link a savings category so that when you categorize a transfer transaction, the savings balance updates automatically. Enter the current balance manually or let it update via imports." />
+              <HelpTooltip text="Track savings envelopes here. Multiple trackers can share one underlying bank account — the total below should match that account's real balance. Link a savings category so transfers update the balance automatically, or add spend categories for envelope-style deductions." />
             </div>
             <button
               onClick={handleAddSavings}
@@ -315,6 +335,41 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
               + Add
             </button>
           </div>
+
+          {/* Total across all trackers */}
+          {savings.length > 0 && (() => {
+            const positives = savings
+              .map((s) => parseFloat(s.balance || '0'))
+              .filter((n) => n > 0)
+              .reduce((a, b) => a + b, 0)
+            const negatives = savings
+              .map((s) => parseFloat(s.balance || '0'))
+              .filter((n) => n < 0)
+              .reduce((a, b) => a + b, 0)
+            const total = positives + negatives
+            return (
+              <div className="bg-green-50 border border-green-100 rounded-lg px-4 py-3 mb-3 flex items-baseline justify-between flex-wrap gap-2">
+                <div>
+                  <div className="text-xs text-green-700 uppercase tracking-wider font-semibold">
+                    Total across {savings.length} tracker{savings.length !== 1 ? 's' : ''}
+                  </div>
+                  <div className="text-xs text-gray-400 mt-0.5">
+                    Should match the real balance of the bank account these trackers live in
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className={`text-xl font-semibold tabular-nums ${total < 0 ? 'text-red-600' : 'text-green-700'}`}>
+                    {fmt.format(total)}
+                  </div>
+                  {negatives < 0 && (
+                    <div className="text-xs text-gray-500 tabular-nums">
+                      {fmt.format(positives)} saved · {fmt.format(negatives)} owed
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
           {savings.map((tracker) => {
             const edits = savingsEdits[tracker.id] ?? {}
             const name = edits.name ?? tracker.name
@@ -395,28 +450,92 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
                   </button>
                 </div>
 
-                {/* Progress bar toward goal */}
-                {goalNum > 0 && (
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-green-500' : 'bg-green-500'}`}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <span className="text-xs tabular-nums text-gray-500 shrink-0 w-28 text-right">
-                      {fmt.format(balNum)} / {fmt.format(goalNum)}
-                    </span>
-                    {monthsLeft !== null && (
-                      <span className="text-xs text-green-600 shrink-0 w-28">
-                        ~{monthsLeft} mo to goal
+                {/* Progress bar — toward goal if set, otherwise relative to the
+                    largest tracker so balances can be compared visually. */}
+                {(() => {
+                  const hasGoal = goalNum > 0
+                  const fillPct = hasGoal
+                    ? pct
+                    : balNum > 0 ? (balNum / maxTrackerBalance) * 100 : 0
+                  const barColor = hasGoal
+                    ? (pct >= 100 ? 'bg-green-500' : 'bg-green-500')
+                    : balNum < 0 ? 'bg-red-400' : 'bg-green-400'
+                  return (
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${barColor}`}
+                          style={{ width: `${Math.max(0, Math.min(100, fillPct))}%` }}
+                        />
+                      </div>
+                      <span className="text-xs tabular-nums text-gray-500 shrink-0 w-28 text-right">
+                        {hasGoal
+                          ? `${fmt.format(balNum)} / ${fmt.format(goalNum)}`
+                          : fmt.format(balNum)}
                       </span>
-                    )}
-                    {pct >= 100 && (
-                      <span className="text-xs text-green-600 font-semibold shrink-0">Goal reached!</span>
-                    )}
-                  </div>
-                )}
+                      {hasGoal && monthsLeft !== null && (
+                        <span className="text-xs text-green-600 shrink-0 w-28">
+                          ~{monthsLeft} mo to goal
+                        </span>
+                      )}
+                      {hasGoal && pct >= 100 && (
+                        <span className="text-xs text-green-600 font-semibold shrink-0">Goal reached!</span>
+                      )}
+                      {!hasGoal && (
+                        <span className="text-xs text-gray-400 shrink-0 w-28 italic">no goal set</span>
+                      )}
+                    </div>
+                  )
+                })()}
+
+                {/* Spend categories — envelope-style "spend from this tracker" */}
+                {(() => {
+                  const currentSpends = edits.spend_categories ?? tracker.spend_categories ?? []
+                  const spendCatNames = new Map(categories.map((c) => [c.id, c]))
+                  return (
+                    <div className="flex items-center gap-2 flex-wrap text-xs">
+                      <span className="text-gray-400 shrink-0 flex items-center gap-1">
+                        Spend from this:
+                        <HelpTooltip text="Pick categories that DEDUCT from this tracker's balance. E.g., link 'Diapers' or 'Kids clothes' so when you categorize a Chase purchase that way, the tracker balance goes down — envelope-style spending." />
+                      </span>
+                      {currentSpends.map((cid) => {
+                        const c = spendCatNames.get(cid)
+                        return (
+                          <span
+                            key={cid}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 border border-green-200 text-green-700 rounded text-xs"
+                          >
+                            {c?.name ?? cid}
+                            <button
+                              onClick={() => handleToggleSpendCategory(tracker, cid)}
+                              className="hover:text-red-600"
+                              title="Remove"
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        )
+                      })}
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          if (e.target.value) handleToggleSpendCategory(tracker, e.target.value)
+                        }}
+                        className="text-xs border rounded px-1.5 py-0.5 text-gray-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                      >
+                        <option value="">+ Add category…</option>
+                        {categories
+                          .filter((c) => c.bucket !== 'income' && c.bucket !== 'transfers')
+                          .filter((c) => !currentSpends.includes(c.id))
+                          .map((c) => (
+                            <option key={c.id} value={c.id}>
+                              [{c.bucket}] {c.name}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  )
+                })()}
               </div>
             )
           })}

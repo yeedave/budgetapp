@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import type { Category, Rule } from '../types'
-import { addCategory, updateCategory, deleteCategory, setCategoryBudget, getRules, saveRule, deleteRule } from '../api'
+import { addCategory, updateCategory, deleteCategory, setCategoryBudget, getRules, saveRule, updateRule, deleteRule } from '../api'
 import HelpTooltip from './HelpTooltip'
 
 const BUCKET_ORDER = ['income', 'bills', 'subscriptions', 'expenses', 'savings', 'debts', 'transfers']
@@ -33,6 +33,11 @@ export default function CategoryManager({ categories, onCategoriesChange }: Prop
   const [rulePattern, setRulePattern] = useState('')
   const [ruleCategoryId, setRuleCategoryId] = useState('')
   const [ruleSaving, setRuleSaving] = useState(false)
+
+  const [editingRuleId, setEditingRuleId] = useState<number | null>(null)
+  const [editRuleForm, setEditRuleForm] = useState<{ pattern: string; category_id: string }>({ pattern: '', category_id: '' })
+  const [editRuleSaving, setEditRuleSaving] = useState(false)
+  const [editRuleError, setEditRuleError] = useState<string | null>(null)
 
   useEffect(() => { getRules().then(setRules) }, [])
 
@@ -98,6 +103,28 @@ export default function CategoryManager({ categories, onCategoriesChange }: Prop
   const handleDeleteRule = async (ruleId: number) => {
     await deleteRule(ruleId)
     setRules((prev) => prev.filter((r) => r.id !== ruleId))
+  }
+
+  function startEditRule(rule: Rule) {
+    setEditingRuleId(rule.id)
+    setEditRuleForm({ pattern: rule.pattern, category_id: rule.category_id })
+    setEditRuleError(null)
+  }
+
+  async function handleSaveEditRule(rule: Rule) {
+    if (!editRuleForm.pattern.trim() || !editRuleForm.category_id) return
+    setEditRuleSaving(true)
+    setEditRuleError(null)
+    const res = await updateRule(rule.id, editRuleForm.pattern.trim(), editRuleForm.category_id)
+    setEditRuleSaving(false)
+    if (!res.ok) { setEditRuleError(res.error ?? 'Failed to save.'); return }
+    const cat = categories.find((c) => c.id === editRuleForm.category_id)
+    setRules((prev) => prev.map((r) =>
+      r.id === rule.id
+        ? { ...r, pattern: editRuleForm.pattern.trim(), category_id: editRuleForm.category_id, category_name: cat?.name ?? null }
+        : r
+    ))
+    setEditingRuleId(null)
   }
 
   const handleBudgetBlur = async (cat: Category) => {
@@ -331,28 +358,79 @@ export default function CategoryManager({ categories, onCategoriesChange }: Prop
             </p>
           ) : (
             <div className="divide-y border rounded overflow-hidden">
-              <div className="grid grid-cols-[1fr_auto_1fr_auto] gap-x-3 px-3 py-1.5 bg-gray-50 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              <div className="grid grid-cols-[1fr_auto_1fr_auto_auto] gap-x-3 px-3 py-1.5 bg-gray-50 text-xs font-semibold text-gray-400 uppercase tracking-wider">
                 <span>Pattern</span>
                 <span />
                 <span>Category</span>
                 <span />
+                <span />
               </div>
               {rules.map((rule) => (
-                <div key={rule.id} className="grid grid-cols-[1fr_auto_1fr_auto] gap-x-3 items-center px-3 py-2 group hover:bg-gray-50">
-                  <code className="text-xs text-gray-700 font-mono truncate" title={rule.pattern}>
-                    {rule.pattern}
-                  </code>
-                  <span className="text-gray-300 text-xs">→</span>
-                  <span className="text-sm text-gray-600 truncate">
-                    {rule.category_name ?? <span className="text-red-400 italic">deleted category</span>}
-                  </span>
-                  <button
-                    onClick={() => handleDeleteRule(rule.id)}
-                    className="text-xs text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all px-1"
-                    title="Delete rule"
-                  >
-                    ✕
-                  </button>
+                <div key={rule.id}>
+                  {editingRuleId === rule.id ? (
+                    <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-green-50">
+                      <input
+                        className="border rounded px-2 py-1 text-xs font-mono w-56 focus:outline-none focus:ring-2 focus:ring-green-500"
+                        value={editRuleForm.pattern}
+                        onChange={(e) => setEditRuleForm((f) => ({ ...f, pattern: e.target.value }))}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEditRule(rule); if (e.key === 'Escape') setEditingRuleId(null) }}
+                        autoFocus
+                      />
+                      <span className="text-gray-300 text-xs">→</span>
+                      <select
+                        className="border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                        value={editRuleForm.category_id}
+                        onChange={(e) => setEditRuleForm((f) => ({ ...f, category_id: e.target.value }))}
+                      >
+                        <option value="">— select —</option>
+                        {BUCKET_ORDER.filter((b) => byBucket[b].length > 0).map((b) => (
+                          <optgroup key={b} label={BUCKET_LABEL[b]}>
+                            {byBucket[b].map((c) => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => handleSaveEditRule(rule)}
+                        disabled={editRuleSaving || !editRuleForm.pattern.trim() || !editRuleForm.category_id}
+                        className="px-3 py-1 bg-green-700 text-white text-xs rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
+                      >
+                        {editRuleSaving ? 'Saving…' : 'Save'}
+                      </button>
+                      <button
+                        onClick={() => setEditingRuleId(null)}
+                        className="px-2 py-1 text-xs text-gray-400 hover:text-gray-700"
+                      >
+                        Cancel
+                      </button>
+                      {editRuleError && <span className="text-xs text-red-600">{editRuleError}</span>}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-[1fr_auto_1fr_auto_auto] gap-x-3 items-center px-3 py-2 group hover:bg-gray-50">
+                      <code className="text-xs text-gray-700 font-mono truncate" title={rule.pattern}>
+                        {rule.pattern}
+                      </code>
+                      <span className="text-gray-300 text-xs">→</span>
+                      <span className="text-sm text-gray-600 truncate">
+                        {rule.category_name ?? <span className="text-red-400 italic">deleted category</span>}
+                      </span>
+                      <button
+                        onClick={() => startEditRule(rule)}
+                        className="text-xs text-gray-300 hover:text-green-700 opacity-0 group-hover:opacity-100 transition-all px-1"
+                        title="Edit rule"
+                      >
+                        ✎
+                      </button>
+                      <button
+                        onClick={() => handleDeleteRule(rule.id)}
+                        className="text-xs text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all px-1"
+                        title="Delete rule"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

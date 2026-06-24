@@ -1,4 +1,4 @@
-import type { Account, Category, Transaction, ImportResult, DebtItem, DebtPlan, SavingsTracker, ProgressData, Rule, BudgetSnapshot, NetWorth, MonthlyTrends, RecurringItem, UpcomingBill, Split, ImportLogEntry, BudgetGuideData, CalendarData, GenerateRulesResult, CategorySuggestion, RuleSuggestion } from './types'
+import type { Account, Category, Transaction, ImportResult, DebtItem, DebtPlan, SavingsTracker, ProgressData, Rule, BudgetSnapshot, NetWorth, MonthlyTrends, RecurringItem, UpcomingBill, Split, ImportLogEntry, BudgetGuideData, CalendarData, GenerateRulesResult, CategorySuggestion, RuleSuggestion, UpcomingScheduledItem, ManualRecurring } from './types'
 
 // Extend Window with the pywebview API shape
 interface PywebviewApi {
@@ -10,9 +10,12 @@ interface PywebviewApi {
   import_any_statement: () => Promise<ImportResult>
   preview_statement: () => Promise<{ detected_format?: string; count?: number; cancelled?: boolean; error?: string }>
   confirm_import: (force_account_id: string) => Promise<ImportResult>
+  preview_pasted_transactions: (text: string) => Promise<{ count: number; transactions: { date: string; description: string; amount: string }[]; error?: string }>
+  import_pasted_transactions: (text: string, account_id: string) => Promise<{ inserted: number; parsed?: number; skipped_near_duplicates?: number; error?: string }>
   set_category: (tx_id: string, category_id: string) => Promise<{ updated_ids: string[] }>
   add_transaction: (date: string, description: string, amount: string, account_id: string, category_id: string) => Promise<Transaction>
   update_transaction_amount: (tx_id: string, amount: string) => Promise<{ ok: boolean; error?: string }>
+  flip_transaction_sign: (tx_id: string) => Promise<{ ok: boolean; error?: string }>
   delete_transaction: (tx_id: string) => Promise<{ ok: boolean; error?: string }>
   count_transactions_range: (start_date: string, end_date: string, account_id: string) => Promise<number>
   delete_transactions_range: (start_date: string, end_date: string, account_id: string) => Promise<{ ok: boolean; deleted: number; error?: string }>
@@ -37,6 +40,7 @@ interface PywebviewApi {
   get_budget_snapshot: (months: string) => Promise<BudgetSnapshot>
   get_rules: () => Promise<Rule[]>
   save_rule: (pattern: string, category_id: string) => Promise<Rule>
+  update_rule: (rule_id: number, pattern: string, category_id: string) => Promise<{ ok: boolean; id?: number; pattern?: string; category_id?: string; error?: string }>
   delete_rule: (rule_id: number) => Promise<void>
   export_backup: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
   import_backup: () => Promise<{ ok: boolean; counts?: Record<string, number>; cancelled?: boolean; error?: string }>
@@ -49,6 +53,13 @@ interface PywebviewApi {
   delete_asset: (asset_id: string) => Promise<void>
   get_monthly_trends: (months: string) => Promise<MonthlyTrends>
   detect_recurring: () => Promise<RecurringItem[]>
+  get_recurring_excluded: () => Promise<{ normalized_description: string; sample_description: string; excluded_at: string }[]>
+  exclude_recurring: (description: string) => Promise<{ ok: boolean; normalized_description?: string; error?: string }>
+  unexclude_recurring: (normalized_description: string) => Promise<{ ok: boolean; error?: string }>
+  get_manual_recurring: () => Promise<ManualRecurring[]>
+  add_manual_recurring: (label: string, amount: string, day_of_month: string, interval_months: string, start_date: string, category_id: string, frequency?: string, second_day_of_month?: string) => Promise<{ ok: boolean; id?: string; error?: string }>
+  delete_manual_recurring: (recurring_id: string) => Promise<{ ok: boolean; error?: string }>
+  get_upcoming_scheduled: (days_ahead: string) => Promise<UpcomingScheduledItem[]>
   get_upcoming_bills: () => Promise<UpcomingBill[]>
   get_splits: (status: string) => Promise<Split[]>
   create_split: (tx_id: string, description: string, owed_by: string, amount_owed: string) => Promise<Split>
@@ -95,6 +106,8 @@ export const importStatement = (accountId: string) =>
 export const importAnyStatement = () => api().import_any_statement()
 export const previewStatement = () => api().preview_statement()
 export const confirmImport = (forceAccountId = '') => api().confirm_import(forceAccountId)
+export const previewPastedTransactions = (text: string) => api().preview_pasted_transactions(text)
+export const importPastedTransactions = (text: string, accountId: string) => api().import_pasted_transactions(text, accountId)
 export const setCategory = (txId: string, categoryId: string) =>
   api().set_category(txId, categoryId)
 
@@ -104,6 +117,7 @@ export const addTransaction = (
 ) => api().add_transaction(date, description, amount, accountId, categoryId)
 
 export const updateTransactionAmount = (txId: string, amount: string) => api().update_transaction_amount(txId, amount)
+export const flipTransactionSign = (txId: string) => api().flip_transaction_sign(txId)
 export const deleteTransaction = (txId: string) => api().delete_transaction(txId)
 export const countTransactionsRange = (startDate: string, endDate: string, accountId = '') =>
   api().count_transactions_range(startDate, endDate, accountId)
@@ -143,6 +157,7 @@ export const getDebtPlan = (extraMonthly: string) => api().get_debt_plan(extraMo
 export const getBudgetSnapshot = (months: string) => api().get_budget_snapshot(months)
 export const getRules = () => api().get_rules()
 export const saveRule = (pattern: string, categoryId: string) => api().save_rule(pattern, categoryId)
+export const updateRule = (ruleId: number, pattern: string, categoryId: string) => api().update_rule(ruleId, pattern, categoryId)
 export const deleteRule = (ruleId: number) => api().delete_rule(ruleId)
 
 export const exportBackup = () => api().export_backup()
@@ -158,6 +173,21 @@ export const saveAsset = (asset: { id: string; name: string; value: string; asse
 export const deleteAsset = (assetId: string) => api().delete_asset(assetId)
 export const getMonthlyTrends = (months: string) => api().get_monthly_trends(months)
 export const detectRecurring = () => api().detect_recurring()
+export const getRecurringExcluded = () => api().get_recurring_excluded()
+export const excludeRecurring = (description: string) => api().exclude_recurring(description)
+export const unexcludeRecurring = (normalizedDescription: string) => api().unexclude_recurring(normalizedDescription)
+export const getManualRecurring = () => api().get_manual_recurring()
+export const addManualRecurring = (
+  label: string, amount: string, dayOfMonth: number, intervalMonths: number,
+  startDate: string, categoryId: string,
+  frequency: 'monthly' | 'biweekly' | 'semimonthly' = 'monthly',
+  secondDayOfMonth?: number,
+) => api().add_manual_recurring(
+  label, amount, String(dayOfMonth), String(intervalMonths), startDate, categoryId,
+  frequency, secondDayOfMonth != null ? String(secondDayOfMonth) : '',
+)
+export const deleteManualRecurring = (id: string) => api().delete_manual_recurring(id)
+export const getUpcomingScheduled = (daysAhead = 60) => api().get_upcoming_scheduled(String(daysAhead))
 export const getUpcomingBills = () => api().get_upcoming_bills()
 export const getSplits = (status: string) => api().get_splits(status)
 export const createSplit = (txId: string, description: string, owedBy: string, amountOwed: string) => api().create_split(txId, description, owedBy, amountOwed)

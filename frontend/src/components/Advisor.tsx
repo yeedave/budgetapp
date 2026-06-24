@@ -7,6 +7,18 @@ interface Message {
   content: string
 }
 
+const CHAT_STORAGE_KEY = 'jadebanking_advisor_chat'
+
+function loadStoredMessages(): Message[] {
+  try {
+    const raw = localStorage.getItem(CHAT_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) return parsed.filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+  } catch { /* ignore corrupt storage */ }
+  return []
+}
+
 const STARTERS = [
   'Analyze my finances and tell me what to cut.',
   'Am I on track to pay off my debts?',
@@ -217,7 +229,7 @@ type AdvisorView = 'chat' | 'rules' | 'skills'
 
 export default function Advisor() {
   const [view, setView] = useState<AdvisorView>('chat')
-  const [messages, setMessages] = useState<Message[]>([])
+  const [messages, setMessages] = useState<Message[]>(() => loadStoredMessages())
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -251,6 +263,14 @@ export default function Advisor() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
+
+  // Persist chat history until the user clicks Clear
+  useEffect(() => {
+    try {
+      if (messages.length === 0) localStorage.removeItem(CHAT_STORAGE_KEY)
+      else localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages))
+    } catch { /* storage full or disabled — ignore */ }
+  }, [messages])
 
   async function send(text?: string) {
     const content = (text ?? input).trim()

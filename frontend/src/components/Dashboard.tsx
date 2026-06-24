@@ -1,12 +1,15 @@
 import { useState } from 'react'
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import type { Transaction, Category } from '../types'
+import { createSplit, flipTransactionSign } from '../api'
 import HelpTooltip from './HelpTooltip'
 
 interface Props {
   transactions: Transaction[]
   categories: Category[]
   onSetCategory: (txId: string, categoryId: string) => void
+  onDeleteTransaction: (txId: string) => Promise<void>
+  onRefresh: () => void
 }
 
 const fmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })
@@ -36,12 +39,24 @@ function TxDrillDown({
   transactions,
   categories,
   onSetCategory,
+  onDeleteTransaction,
+  onRefresh,
 }: {
   catId: string
   transactions: Transaction[]
   categories: Category[]
   onSetCategory: (txId: string, categoryId: string) => void
+  onDeleteTransaction: (txId: string) => Promise<void>
+  onRefresh: () => void
 }) {
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [splitOpenId, setSplitOpenId] = useState<string | null>(null)
+  const [splitOwedBy, setSplitOwedBy] = useState('')
+  const [splitAmount, setSplitAmount] = useState('')
+  const [splitSaving, setSplitSaving] = useState(false)
+  const [splitError, setSplitError] = useState<string | null>(null)
+
   const txs = transactions
     .filter((t) => t.category_id === catId)
     .sort((a, b) => b.date.localeCompare(a.date))
@@ -50,51 +65,177 @@ function TxDrillDown({
     return <div className="px-5 py-3 text-xs text-gray-400">No transactions for this category.</div>
   }
 
+  async function handleDelete(txId: string) {
+    setDeletingId(txId)
+    await onDeleteTransaction(txId)
+    setDeletingId(null)
+    setConfirmDeleteId(null)
+  }
+
+  function openSplit(tx: Transaction) {
+    setSplitOpenId(tx.id)
+    setSplitOwedBy('')
+    setSplitAmount('')
+    setSplitError(null)
+  }
+
+  async function handleSubmitSplit(tx: Transaction) {
+    if (!splitOwedBy.trim() || !splitAmount) return
+    setSplitSaving(true)
+    setSplitError(null)
+    const res = await createSplit(tx.id, tx.description, splitOwedBy.trim(), splitAmount) as { error?: string }
+    setSplitSaving(false)
+    if (res?.error) {
+      setSplitError(res.error)
+      return
+    }
+    setSplitOpenId(null)
+    onRefresh()
+  }
+
+  async function handleFlipSign(tx: Transaction) {
+    await flipTransactionSign(tx.id)
+    onRefresh()
+  }
+
   return (
     <div className="bg-gray-50 border-t">
-      {txs.map((tx) => (
-        <div key={tx.id} className="flex items-center gap-3 px-5 py-2 border-b border-gray-100 last:border-0">
-          <div className="text-xs text-gray-400 w-20 shrink-0 tabular-nums">{tx.date}</div>
-          <div className="flex-1 text-sm text-gray-700 truncate">{tx.description}</div>
-          <div className={`text-sm tabular-nums shrink-0 w-24 text-right font-medium ${
-            parseFloat(tx.amount) < 0 ? 'text-red-600' : 'text-green-600'
-          }`}>
-            {parseFloat(tx.amount) < 0 ? `−${fmtAbs(parseFloat(tx.amount))}` : fmt.format(parseFloat(tx.amount))}
+      {txs.map((tx) => {
+        const isConfirming = confirmDeleteId === tx.id
+        const isDeleting = deletingId === tx.id
+        const isSplitting = splitOpenId === tx.id
+        return (
+          <div key={tx.id} className="border-b border-gray-100 last:border-0">
+            <div className="flex items-center gap-3 px-5 py-2 group">
+              <div className="text-xs text-gray-400 w-20 shrink-0 tabular-nums">{tx.date}</div>
+              <div className="flex-1 text-sm text-gray-700 truncate">{tx.description}</div>
+              <button
+                onClick={() => handleFlipSign(tx)}
+                title={parseFloat(tx.amount) < 0 ? 'This is an expense — click to flip to income' : 'This is an income — click to flip to expense'}
+                className={`text-sm tabular-nums shrink-0 w-24 text-right font-medium hover:underline decoration-dotted ${
+                  parseFloat(tx.amount) < 0 ? 'text-red-600' : 'text-green-600'
+                }`}
+              >
+                {parseFloat(tx.amount) < 0 ? `−${fmtAbs(parseFloat(tx.amount))}` : fmt.format(parseFloat(tx.amount))}
+              </button>
+              <select
+                value={tx.category_id ?? ''}
+                onChange={(e) => onSetCategory(tx.id, e.target.value)}
+                className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-green-500 w-40 shrink-0"
+              >
+                <option value="">— uncategorized —</option>
+                {BUCKET_ORDER.map((bucket) => {
+                  const cats = categories.filter((c) => c.bucket === bucket)
+                  if (!cats.length) return null
+                  return (
+                    <optgroup key={bucket} label={BUCKET_LABEL[bucket] ?? bucket}>
+                      {cats.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </optgroup>
+                  )
+                })}
+              </select>
+              {isConfirming ? (
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => handleDelete(tx.id)}
+                    disabled={isDeleting}
+                    className="text-xs px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-40 transition-colors"
+                  >
+                    {isDeleting ? '…' : 'Delete'}
+                  </button>
+                  <button
+                    onClick={() => setConfirmDeleteId(null)}
+                    disabled={isDeleting}
+                    className="text-xs px-2 py-1 text-gray-400 hover:text-gray-700 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => isSplitting ? setSplitOpenId(null) : openSplit(tx)}
+                    title="Split this transaction"
+                    className={`text-xs px-1 transition-all ${
+                      isSplitting
+                        ? 'text-green-700'
+                        : 'text-gray-300 hover:text-green-700 opacity-0 group-hover:opacity-100'
+                    }`}
+                  >
+                    ⎘
+                  </button>
+                  <button
+                    onClick={() => setConfirmDeleteId(tx.id)}
+                    title="Delete transaction"
+                    className="text-xs text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all px-1"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {isSplitting && (
+              <div className="bg-green-50 px-5 py-2 border-t border-green-100 flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-gray-500">Owed by</span>
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="Name"
+                  value={splitOwedBy}
+                  onChange={(e) => setSplitOwedBy(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSubmitSplit(tx)}
+                  className="text-xs border border-gray-200 rounded px-2 py-1 w-32 focus:outline-none focus:ring-1 focus:ring-green-500"
+                />
+                <span className="text-xs text-gray-500">for</span>
+                <span className="text-xs text-gray-500">$</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={splitAmount}
+                  onChange={(e) => setSplitAmount(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSubmitSplit(tx)}
+                  className="text-xs border border-gray-200 rounded px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-green-500"
+                />
+                <button
+                  onClick={() => handleSubmitSplit(tx)}
+                  disabled={splitSaving || !splitOwedBy.trim() || !splitAmount}
+                  className="text-xs px-3 py-1 bg-green-700 text-white rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
+                >
+                  {splitSaving ? '…' : 'Split'}
+                </button>
+                <button
+                  onClick={() => setSplitOpenId(null)}
+                  className="text-xs px-2 py-1 text-gray-400 hover:text-gray-700"
+                >
+                  Cancel
+                </button>
+                {splitError && <span className="text-xs text-red-600">{splitError}</span>}
+              </div>
+            )}
           </div>
-          <select
-            value={tx.category_id ?? ''}
-            onChange={(e) => onSetCategory(tx.id, e.target.value)}
-            className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-green-500 w-40 shrink-0"
-          >
-            <option value="">— uncategorized —</option>
-            {BUCKET_ORDER.map((bucket) => {
-              const cats = categories.filter((c) => c.bucket === bucket)
-              if (!cats.length) return null
-              return (
-                <optgroup key={bucket} label={BUCKET_LABEL[bucket] ?? bucket}>
-                  {cats.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </optgroup>
-              )
-            })}
-          </select>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
 
-export default function Dashboard({ transactions, categories, onSetCategory }: Props) {
+export default function Dashboard({ transactions, categories, onSetCategory, onDeleteTransaction, onRefresh }: Props) {
   const [expandedCatId, setExpandedCatId] = useState<string | null>(null)
 
   function toggleExpand(catId: string) {
     setExpandedCatId((prev) => (prev === catId ? null : catId))
   }
 
-  // ── Transfer category IDs (excluded from income/expense totals) ──
+  // ── Category IDs excluded from income/expense totals ──
+  // Transfers: pure pass-throughs (CC payments, inter-account moves)
+  // Savings: contributions tracked separately; positive savings amounts (e.g. misrouted
+  //   deposits) must not inflate the income card
   const transferCatIds = new Set(
-    categories.filter((c) => c.bucket === 'transfers').map((c) => c.id)
+    categories.filter((c) => c.bucket === 'transfers' || c.bucket === 'savings').map((c) => c.id)
   )
 
   // ── Income by owner ───────────────────────────────────────────────
@@ -129,16 +270,20 @@ export default function Dashboard({ transactions, categories, onSetCategory }: P
   }
 
   // ── Budget tracker rows ───────────────────────────────────────────
+  // Scale monthly budget targets by the number of distinct months visible
+  const numMonths = Math.max(1, new Set(transactions.map((tx) => tx.date.slice(0, 7))).size)
+
   const BUDGET_BUCKETS = ['income', 'bills', 'subscriptions', 'expenses', 'savings', 'debts']
   const budgetRows = categories
     .filter((c) => c.budget_amount && BUDGET_BUCKETS.includes(c.bucket))
     .map((c) => {
-      const budget = parseFloat(c.budget_amount!)
+      const monthlyBudget = parseFloat(c.budget_amount!)
+      const budget = monthlyBudget * numMonths
       const actual = byCategory[c.id] ?? 0
       const spent = c.bucket === 'income' ? actual : Math.abs(actual)
       const pct = budget > 0 ? Math.min((spent / budget) * 100, 100) : 0
       const over = spent > budget
-      return { cat: c, budget, spent, pct, over }
+      return { cat: c, budget, monthlyBudget, spent, pct, over }
     })
     .sort((a, b) => {
       if (a.over !== b.over) return a.over ? -1 : 1
@@ -248,9 +393,14 @@ export default function Dashboard({ transactions, categories, onSetCategory }: P
         <div className="bg-white rounded-lg border divide-y overflow-hidden">
           <div className="px-5 py-3 flex items-center gap-2 text-sm font-semibold text-gray-500 uppercase tracking-wider">
             Budget Tracker
-            <HelpTooltip text="Compares actual spending to your budget. Click any row to see its transactions. Set budgets in the Categories tab." />
+            {numMonths > 1 && (
+              <span className="text-xs font-normal text-gray-400 normal-case ml-1">
+                ({numMonths} months — budgets scaled)
+              </span>
+            )}
+            <HelpTooltip text="Compares actual spending to your monthly budget targets. When viewing multiple months, budgets are multiplied by the number of months shown. Set budgets in the Categories tab." />
           </div>
-          {budgetRows.map(({ cat, budget, spent, pct, over }) => {
+          {budgetRows.map(({ cat, budget, monthlyBudget, spent, pct, over }) => {
             const remaining = budget - spent
             const barColor = over ? 'bg-red-400' : pct >= 80 ? 'bg-amber-400' : 'bg-green-400'
             const isOpen = expandedCatId === cat.id
@@ -262,7 +412,12 @@ export default function Dashboard({ transactions, categories, onSetCategory }: P
                 >
                   <div className="w-40 shrink-0">
                     <div className="text-sm text-gray-700 truncate">{cat.name}</div>
-                    <div className="text-xs text-gray-400 capitalize">{cat.bucket}</div>
+                    <div className="text-xs text-gray-400 capitalize">
+                      {cat.bucket}
+                      {numMonths > 1 && (
+                        <span className="ml-1 text-gray-300">{fmtAbs(monthlyBudget)}/mo</span>
+                      )}
+                    </div>
                   </div>
                   <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
                     <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${pct}%` }} />
@@ -284,6 +439,8 @@ export default function Dashboard({ transactions, categories, onSetCategory }: P
                     transactions={transactions}
                     categories={categories}
                     onSetCategory={onSetCategory}
+                    onDeleteTransaction={onDeleteTransaction}
+                    onRefresh={onRefresh}
                   />
                 )}
               </div>
@@ -343,6 +500,8 @@ export default function Dashboard({ transactions, categories, onSetCategory }: P
                             transactions={transactions}
                             categories={categories}
                             onSetCategory={onSetCategory}
+                            onDeleteTransaction={onDeleteTransaction}
+                            onRefresh={onRefresh}
                           />
                         )}
                       </div>

@@ -66,6 +66,65 @@ function CategorySelect({
   )
 }
 
+const BUCKET_GUIDE = [
+  {
+    bucket: 'income',
+    emoji: '💰',
+    label: 'Income',
+    plain: 'Money that comes INTO your accounts from the outside world.',
+    examples: ['Paycheck / direct deposit', 'Tax refund', 'Freelance payment', 'Interest earned'],
+    tip: null,
+  },
+  {
+    bucket: 'bills',
+    emoji: '🏠',
+    label: 'Bills',
+    plain: 'Fixed costs that hit every month whether you like it or not. The amount barely changes.',
+    examples: ['Rent or mortgage', 'Electricity / gas', 'Phone plan', 'Internet', 'Insurance'],
+    tip: null,
+  },
+  {
+    bucket: 'subscriptions',
+    emoji: '📺',
+    label: 'Subscriptions',
+    plain: 'Recurring services you chose to sign up for. Unlike bills, these are easier to cancel if money gets tight.',
+    examples: ['Netflix, Hulu, Disney+', 'Spotify, Apple Music', 'Gym membership', 'Software (Adobe, Microsoft 365)'],
+    tip: null,
+  },
+  {
+    bucket: 'expenses',
+    emoji: '🛒',
+    label: 'Expenses',
+    plain: 'Day-to-day spending that changes every month depending on what you do.',
+    examples: ['Groceries', 'Restaurants and coffee', 'Gas', 'Shopping / Amazon', 'Entertainment'],
+    tip: null,
+  },
+  {
+    bucket: 'savings',
+    emoji: '🏦',
+    label: 'Savings',
+    plain: 'Money you are deliberately moving out of your spending account to save for later. Only the SENDING side of the transfer gets this — the account receiving the money gets Transfers (see below).',
+    examples: ['Transfer from checking → Marcus HYSA', 'Transfer from checking → investment account'],
+    tip: 'Only the outflow from your main checking account goes here. The deposit on the savings account side is a Transfer.',
+  },
+  {
+    bucket: 'debts',
+    emoji: '📉',
+    label: 'Debts',
+    plain: 'Payments toward loans or credit cards where you still owe money. This is for the minimum/extra payments — not the purchases you made on the card.',
+    examples: ['Car loan payment', 'Student loan payment', 'Personal loan'],
+    tip: null,
+  },
+  {
+    bucket: 'transfers',
+    emoji: '🔄',
+    label: 'Transfers',
+    plain: 'Money moving between accounts you already own. It\'s not new spending or new income — just shuffling your own money around. These are completely excluded from your income and expense totals.',
+    examples: ['Paying off your credit card balance', 'Deposit received on your savings account', 'Moving money between checking accounts'],
+    tip: 'If you see a CC payment inflating your expenses, change it to Transfers. If a savings deposit is showing as income, change it to Transfers too.',
+  },
+]
+
 export default function BudgetGuide({ categories, onSetCategory }: Props) {
   const [guide, setGuide] = useState<BudgetGuideData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -74,6 +133,7 @@ export default function BudgetGuide({ categories, onSetCategory }: Props) {
   const [budgetEdits, setBudgetEdits] = useState<Record<string, string>>({})
   const [savingBudget, setSavingBudget] = useState<Set<string>>(new Set())
   const [openBuckets, setOpenBuckets] = useState<Set<string>>(new Set(BUCKET_ORDER))
+  const [helpOpen, setHelpOpen] = useState(true)
 
   useEffect(() => {
     getBudgetGuide().then((data) => {
@@ -151,6 +211,114 @@ export default function BudgetGuide({ categories, onSetCategory }: Props) {
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-8 space-y-10">
+
+      {/* ── Help & Explainer ─────────────────────────────────────────── */}
+      <div className="border border-gray-200 rounded-xl overflow-hidden">
+        <button
+          onClick={() => setHelpOpen((v) => !v)}
+          className="w-full flex items-center justify-between px-5 py-4 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-base">📖</span>
+            <span className="font-semibold text-gray-700">How to use Jade Banking</span>
+            <span className="text-xs text-gray-400 font-normal ml-1">— start here if you're new</span>
+          </div>
+          <span className="text-gray-400 text-xs">{helpOpen ? '▲' : '▼'}</span>
+        </button>
+
+        {helpOpen && (
+          <div className="px-5 py-5 space-y-7 bg-white">
+
+            {/* How it works */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">How it works — 3 simple steps</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {[
+                  { step: '1', emoji: '📥', title: 'Import', body: 'Click "Import Statement" at the top. Pick a PDF from your bank\'s website. Choose which account it belongs to. The app reads all the transactions automatically.' },
+                  { step: '2', emoji: '🏷️', title: 'Categorize', body: 'Tell the app what each transaction was for — groceries, Netflix, rent, etc. Once you do it once, the app remembers and does it automatically next time.' },
+                  { step: '3', emoji: '📊', title: 'Review', body: 'Check the Dashboard to see your spending by category, how much you earned vs spent, and whether you\'re on track with your budget.' },
+                ].map(({ step, emoji, title, body }) => (
+                  <div key={step} className="bg-gray-50 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-lg">{emoji}</span>
+                      <span className="font-semibold text-gray-800 text-sm">Step {step}: {title}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 leading-relaxed">{body}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* What are buckets */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-1">What are categories and buckets?</h3>
+              <p className="text-xs text-gray-500 mb-3 leading-relaxed">
+                Every transaction gets a <strong>category</strong> (like "Groceries" or "Netflix"). Categories belong to a <strong>bucket</strong> — a group that tells the app how to treat that money. Here's what each bucket means:
+              </p>
+              <div className="space-y-3">
+                {BUCKET_GUIDE.map(({ emoji, label, plain, examples, tip }) => (
+                  <div key={label} className="border border-gray-100 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span>{emoji}</span>
+                      <span className="font-semibold text-gray-800 text-sm">{label}</span>
+                    </div>
+                    <p className="text-xs text-gray-600 mb-2 leading-relaxed">{plain}</p>
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {examples.map((ex) => (
+                        <span key={ex} className="text-xs bg-gray-100 text-gray-500 rounded px-2 py-0.5">{ex}</span>
+                      ))}
+                    </div>
+                    {tip && (
+                      <p className="text-xs text-amber-700 bg-amber-50 rounded px-3 py-2 leading-relaxed">
+                        💡 {tip}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Common questions */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">Common questions</h3>
+              <div className="space-y-3">
+                {[
+                  {
+                    q: 'My credit card payment is showing as an expense — that seems wrong.',
+                    a: 'It is wrong! A credit card payment is just YOUR money moving from checking to pay off the card — you already counted the spending when you made the purchases. Change the payment transaction to a Transfers category so it doesn\'t count twice.',
+                  },
+                  {
+                    q: 'My savings deposit is showing as income.',
+                    a: 'The deposit landing in your savings account is a Transfer (not new income — it\'s still your money). Change that deposit to a Transfers category. The outflow from your checking account is what gets the Savings category.',
+                  },
+                  {
+                    q: 'I can\'t find a transaction I\'m looking for.',
+                    a: 'You probably have a filter active. In the left sidebar, click "All accounts" and "All months" to see everything. Then use Cmd+F (Mac) or Ctrl+F (PC) to search by description, amount, or category.',
+                  },
+                  {
+                    q: 'I imported the same statement twice by accident.',
+                    a: 'No problem — the app detects duplicates automatically using a unique fingerprint for each transaction. Re-importing the same PDF is always safe. You can also use "Find Duplicates" in the Transactions tab to double-check.',
+                  },
+                  {
+                    q: 'What\'s the difference between Bills and Subscriptions?',
+                    a: 'Bills are things you have little choice about — rent, utilities, insurance, phone. Subscriptions are services you chose to sign up for and can cancel — Netflix, Spotify, gym. The split helps you see what\'s truly fixed vs what you could cut if needed.',
+                  },
+                  {
+                    q: 'The income card shows a weirdly high number.',
+                    a: 'A savings deposit or CC payment is probably categorized wrong and counted as income. Find the positive transaction that doesn\'t look like real income (paycheck, etc.) and change it to Transfers.',
+                  },
+                ].map(({ q, a }) => (
+                  <div key={q} className="border-l-2 border-green-200 pl-4">
+                    <p className="text-xs font-semibold text-gray-700 mb-1">Q: {q}</p>
+                    <p className="text-xs text-gray-500 leading-relaxed">A: {a}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+          </div>
+        )}
+      </div>
 
       {/* Progress */}
       <div>

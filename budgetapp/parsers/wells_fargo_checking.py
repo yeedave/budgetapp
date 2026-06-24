@@ -18,8 +18,19 @@ from .base import AbstractParser, TRANSACTION_COLUMNS, year_for_tx
 _DATE_RE = re.compile(r'^\d{1,2}/\d{1,2}$')
 _AMOUNT_RE = re.compile(r'^[\d,]+\.\d{2}$')
 _YEAR_RE = re.compile(r'\b(20\d{2})\b')
-# "Statement Period Month DD, YYYY - Month DD, YYYY" or "MM/DD/YYYY to MM/DD/YYYY"
-_PERIOD_END_RE = re.compile(r'(?:through|to|-)\s+(\d{1,2})/\d{1,2}/(\d{4})', re.IGNORECASE)
+# Numeric: "MM/DD/YYYY" after "through / to / -"
+_PERIOD_END_NUM_RE = re.compile(r'(?:through|to|-)\s+(\d{1,2})/\d{1,2}/(\d{4})', re.IGNORECASE)
+# Written month: "December 31, 2025" or "January 3 2026" after "through / to / -"
+_MONTH_NAMES = {
+    'january': 1, 'february': 2, 'march': 3, 'april': 4,
+    'may': 5, 'june': 6, 'july': 7, 'august': 8,
+    'september': 9, 'october': 10, 'november': 11, 'december': 12,
+}
+_PERIOD_END_NAME_RE = re.compile(
+    r'(?:through|to|-)\s+(January|February|March|April|May|June|July|August'
+    r'|September|October|November|December)\s+\d{1,2},?\s+(\d{4})',
+    re.IGNORECASE,
+)
 
 
 class WellsFargoCheckingParser(AbstractParser):
@@ -35,15 +46,25 @@ class WellsFargoCheckingParser(AbstractParser):
                 text = page.extract_text() or ""
 
                 if year is None:
-                    # Try to find statement period end date first (more accurate)
-                    m = _PERIOD_END_RE.search(text)
+                    # Try numeric MM/DD/YYYY period end first
+                    m = _PERIOD_END_NUM_RE.search(text)
                     if m:
                         end_month = int(m.group(1))
                         year = int(m.group(2))
                     else:
-                        m2 = _YEAR_RE.search(text)
+                        # Try written-month format ("December 31, 2025")
+                        m2 = _PERIOD_END_NAME_RE.search(text)
                         if m2:
-                            year = int(m2.group(1))
+                            end_month = _MONTH_NAMES[m2.group(1).lower()]
+                            year = int(m2.group(2))
+                        else:
+                            # Last resort: grab any 4-digit year, capped at current year
+                            # to avoid picking up future dates printed on the statement
+                            for yr_match in _YEAR_RE.finditer(text):
+                                candidate = int(yr_match.group(1))
+                                if candidate <= date.today().year:
+                                    year = candidate
+                                    break
 
                 words = page.extract_words()
 
