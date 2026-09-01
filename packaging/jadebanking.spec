@@ -100,8 +100,8 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "Jade Banking",
             "CFBundleDisplayName": "Jade Banking",
-            "CFBundleShortVersionString": "1.0.0",
-            "CFBundleVersion": "1.0.0",
+            "CFBundleShortVersionString": "0.1.0",
+            "CFBundleVersion": "0.1.0",
             "NSHighResolutionCapable": True,
             # Suppress the "app wants to control finder" prompt on newer macOS
             "LSApplicationCategoryType": "public.app-category.finance",
