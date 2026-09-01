@@ -73,8 +73,12 @@ BACKUP_DIR = _data_dir / "backups"
 SETTINGS_FILE = _data_dir / "settings.json"
 ADVISOR_SKILLS_FILE = _data_dir / "advisor_skills.md"
 
-# Icon — always shipped alongside the app (bundle or repo)
+# Icon — always shipped alongside the app (bundle or repo).
+# Tracked at assets/icon.png in the repo (data/ is gitignored, so the icon
+# has to live somewhere CI can see it).
 if IS_FROZEN:
     APP_ICON = Path(getattr(sys, "_MEIPASS", PACKAGE_DIR)) / "icon.png"
 else:
-    APP_ICON = PROJECT_ROOT / "data" / "icon.png"
+    _repo_icon = PROJECT_ROOT / "assets" / "icon.png"
+    _legacy_icon = PROJECT_ROOT / "data" / "icon.png"
+    APP_ICON = _repo_icon if _repo_icon.exists() else _legacy_icon

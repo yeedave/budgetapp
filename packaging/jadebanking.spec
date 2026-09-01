@@ -17,7 +17,7 @@ REPO = Path(SPEC).parent.parent.resolve()
 # ── Assets bundled next to the executable ────────────────────────────────
 datas = [
     (str(REPO / "frontend" / "dist"), "frontend_dist"),
-    (str(REPO / "data" / "icon.png"), "."),
+    (str(REPO / "assets" / "icon.png"), "."),
 ]
 
 # ── Hidden imports pywebview / pdfplumber pull in dynamically ────────────
@@ -75,8 +75,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(REPO / "data" / "icon.png") if sys.platform == "win32"
-         else str(REPO / "Jade Banking.app" / "Contents" / "Resources" / "icon.icns"),
+    icon=str(REPO / "assets" / ("icon.png" if sys.platform == "win32" else "icon.icns")),
 )
 
 coll = COLLECT(
@@ -95,7 +94,7 @@ if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name="Jade Banking.app",
-        icon=str(REPO / "Jade Banking.app" / "Contents" / "Resources" / "icon.icns"),
+        icon=str(REPO / "assets" / "icon.icns"),
         bundle_identifier="com.jadebanking.app",
         info_plist={
             "CFBundleName": "Jade Banking",
