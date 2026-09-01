@@ -3,6 +3,18 @@ import type { Account, Category, Transaction, ImportResult, DebtItem, DebtPlan, 
 // Extend Window with the pywebview API shape
 interface PywebviewApi {
   ping: () => Promise<string>
+  app_version: () => Promise<{ version: string; releases_url: string }>
+  check_for_updates: () => Promise<{
+    current: string
+    latest?: string
+    update_available?: boolean
+    release_url?: string
+    release_name?: string
+    published_at?: string
+    release_notes?: string
+    releases_url?: string
+    error?: string
+  }>
   get_accounts: () => Promise<Account[]>
   get_categories: () => Promise<Category[]>
   get_transactions: (account_id: string, month: string) => Promise<Transaction[]>
@@ -112,6 +124,8 @@ function api(): PywebviewApi {
 }
 
 export const ping = () => api().ping()
+export const appVersion = () => api().app_version()
+export const checkForUpdates = () => api().check_for_updates()
 export const getAccounts = () => api().get_accounts()
 export const getCategories = () => api().get_categories()
 export const getTransactions = (accountId = '', month = '') =>

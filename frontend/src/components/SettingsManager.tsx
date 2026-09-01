@@ -4,6 +4,7 @@ import {
   exportBackup, importBackup, getSettings, saveSetting, resetTransactions, factoryReset,
   getImportLog, undoImport, moveImport, getAccounts,
   getActivityLog, undoActivity,
+  appVersion, checkForUpdates,
 } from '../api'
 
 export default function SettingsManager() {
@@ -40,6 +41,19 @@ export default function SettingsManager() {
     setAccounts(accs)
   }
 
+  // Version & update check
+  const [currentVersion, setCurrentVersion] = useState<string>('')
+  const [releasesUrl, setReleasesUrl] = useState<string>('')
+  const [updateInfo, setUpdateInfo] = useState<Awaited<ReturnType<typeof checkForUpdates>> | null>(null)
+  const [checkingUpdates, setCheckingUpdates] = useState(false)
+
+  async function handleCheckForUpdates() {
+    setCheckingUpdates(true)
+    const res = await checkForUpdates()
+    setUpdateInfo(res)
+    setCheckingUpdates(false)
+  }
+
   // Activity log
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([])
   const [activityBusy, setActivityBusy] = useState<number | null>(null)
@@ -71,6 +85,10 @@ export default function SettingsManager() {
     })
     refreshImportLog()
     refreshActivityLog()
+    appVersion().then((v) => {
+      setCurrentVersion(v.version)
+      setReleasesUrl(v.releases_url)
+    })
   }, [])
 
   async function handleUndoImport(id: number) {
@@ -177,6 +195,83 @@ export default function SettingsManager() {
 
   return (
     <div className="max-w-xl mx-auto px-6 py-8 space-y-8">
+
+      {/* ── About & Updates ─────────────────────────────────────── */}
+      <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-800">Jade Banking</h2>
+            <p className="text-sm text-gray-500 mt-0.5">
+              Version <span className="font-mono">{currentVersion || '—'}</span>
+              {releasesUrl && (
+                <>
+                  {' · '}
+                  <a
+                    href={releasesUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-green-700 hover:underline"
+                  >
+                    all releases ↗
+                  </a>
+                </>
+              )}
+            </p>
+          </div>
+          <button
+            onClick={handleCheckForUpdates}
+            disabled={checkingUpdates}
+            className="text-sm px-3 py-1.5 border border-gray-200 text-gray-700 rounded hover:border-green-400 hover:text-green-700 hover:bg-green-50 disabled:opacity-40 transition-colors"
+          >
+            {checkingUpdates ? 'Checking…' : 'Check for updates'}
+          </button>
+        </div>
+
+        {updateInfo && (
+          <div className="mt-4">
+            {updateInfo.error ? (
+              <div className="text-xs text-red-600 bg-red-50 rounded px-3 py-2">
+                {updateInfo.error}
+              </div>
+            ) : updateInfo.update_available ? (
+              <div className="bg-green-50 border border-green-200 rounded p-3">
+                <div className="text-sm font-semibold text-green-800">
+                  New version available: v{updateInfo.latest}
+                </div>
+                <p className="text-xs text-green-700 mt-1">
+                  Your data lives outside the app folder, so replacing the app
+                  won't lose anything. Download the new version, replace the
+                  old app, and open it — that's it.
+                </p>
+                {updateInfo.release_url && (
+                  <a
+                    href={updateInfo.release_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block mt-2 text-xs px-3 py-1.5 bg-green-700 text-white rounded hover:bg-green-800 transition-colors"
+                  >
+                    Download v{updateInfo.latest} ↗
+                  </a>
+                )}
+                {updateInfo.release_notes && (
+                  <details className="mt-3">
+                    <summary className="text-xs text-green-700 cursor-pointer hover:underline">
+                      What's new
+                    </summary>
+                    <pre className="mt-2 text-xs text-gray-700 whitespace-pre-wrap font-sans bg-white border border-green-100 rounded p-2 max-h-56 overflow-y-auto">
+                      {updateInfo.release_notes}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            ) : (
+              <div className="text-sm text-gray-500 bg-gray-50 rounded px-3 py-2">
+                You're on the latest version — v{updateInfo.current}.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* ── AI Advisor ──────────────────────────────────────────── */}
       <div>

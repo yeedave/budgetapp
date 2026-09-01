@@ -308,6 +308,11 @@ Calendar tab → find the entry in Upcoming Payments → hover → click ✕. Hi
 **"I moved apartments and my rent amount changed."**
 Just update the budget on the Rent category. When the first new rent transaction comes in, categorize it manually — the app learns and future imports auto-categorize.
 
+**"How do I update the app when a new version comes out?"**
+Open Settings and click **Check for updates** at the top. If a newer version is available, click **Download** to open the release page. Grab the zip for your OS, replace the old app the same way you installed the first one, and open it. Your data lives *outside* the app folder, so nothing is ever lost between updates.
+
+If you'd rather check manually, visit https://github.com/yeedave/budgetapp/releases in your browser and grab the newest zip.
+
 ---
 
 ## Where your data lives

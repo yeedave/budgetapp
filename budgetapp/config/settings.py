@@ -55,6 +55,20 @@ APP_NAME = "Jade Banking" + (" (Demo)" if DEMO_MODE else "")
 APP_WIDTH = 1400
 APP_HEIGHT = 900
 
+# ── Version + update source ──────────────────────────────────────────────
+# Read from the installed package metadata so it stays in sync with pyproject.
+# Fall back to a hard-coded string if the package isn't installed as metadata
+# (e.g. running from a fresh git clone without `pip install -e .`).
+try:
+    from importlib.metadata import version as _pkg_version
+    APP_VERSION = _pkg_version("budgetapp")
+except Exception:
+    APP_VERSION = "0.1.0"
+
+GITHUB_REPO = "yeedave/budgetapp"
+RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases"
+GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+
 BACKUP_DIR = _data_dir / "backups"
 SETTINGS_FILE = _data_dir / "settings.json"
 ADVISOR_SKILLS_FILE = _data_dir / "advisor_skills.md"

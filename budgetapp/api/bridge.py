@@ -81,6 +81,76 @@ class Api:
         return "pong"
 
     # ------------------------------------------------------------------
+    # Version + update check
+    # ------------------------------------------------------------------
+
+    def app_version(self) -> dict:
+        from budgetapp.config.settings import APP_VERSION, RELEASES_URL
+        return {"version": APP_VERSION, "releases_url": RELEASES_URL}
+
+    def check_for_updates(self) -> dict:
+        """Query the GitHub Releases API and compare the latest tag to the
+        currently-running version. Returns:
+          {
+            "current": "0.1.0",
+            "latest": "0.2.0",
+            "update_available": True,
+            "release_url": "https://github.com/…/releases/tag/v0.2.0",
+            "release_name": "Jade Banking v0.2.0",
+            "published_at": "2026-08-15T…",
+          }
+        On network failure returns {"error": "..."}.
+        """
+        import json
+        import urllib.request
+        from budgetapp.config.settings import APP_VERSION, GITHUB_API_LATEST, RELEASES_URL
+
+        def _norm(v: str) -> tuple:
+            """Parse '0.1.0' or 'v0.1.0' into a comparable tuple. Non-numeric
+            suffixes (rc, beta, dev) sort as older than plain releases."""
+            v = v.lstrip("v").strip()
+            parts: list = []
+            for chunk in v.split("."):
+                num = ""
+                for c in chunk:
+                    if c.isdigit():
+                        num += c
+                    else:
+                        break
+                parts.append(int(num) if num else 0)
+            return tuple(parts)
+
+        try:
+            req = urllib.request.Request(
+                GITHUB_API_LATEST,
+                headers={"User-Agent": f"JadeBanking/{APP_VERSION}"},
+            )
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = json.loads(resp.read().decode())
+        except Exception as exc:
+            return {"error": f"Could not reach GitHub: {exc}", "current": APP_VERSION}
+
+        latest_tag = (data.get("tag_name") or "").strip()
+        if not latest_tag:
+            return {
+                "error": "No releases published yet.",
+                "current": APP_VERSION,
+                "releases_url": RELEASES_URL,
+            }
+
+        latest_norm = _norm(latest_tag)
+        current_norm = _norm(APP_VERSION)
+        return {
+            "current": APP_VERSION,
+            "latest": latest_tag.lstrip("v"),
+            "update_available": latest_norm > current_norm,
+            "release_url": data.get("html_url") or RELEASES_URL,
+            "release_name": data.get("name") or latest_tag,
+            "published_at": data.get("published_at"),
+            "release_notes": (data.get("body") or "").strip()[:2000],
+        }
+
+    # ------------------------------------------------------------------
     # Read
     # ------------------------------------------------------------------
 
