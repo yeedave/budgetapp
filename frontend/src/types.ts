@@ -253,6 +253,15 @@ export interface Split {
   tx_amount?: string
 }
 
+export interface ActivityLogEntry {
+  id: number
+  at: string
+  action: string        // 'delete_tx' | 'add_tx' | 'set_category' | 'flip_sign' | 'bulk_delete' | 'split_create' | …
+  description: string
+  undoable: number      // 0 | 1 — SQLite returns as integer
+  reverted_at: string | null
+}
+
 export interface ImportLogEntry {
   id: number
   account_id: string
@@ -260,6 +269,8 @@ export interface ImportLogEntry {
   filename: string
   imported_at: string
   inserted: number
+  tx_ids?: string | null       // JSON array of tx ids inserted by this batch
+  reverted_at?: string | null  // set when the import was undone
 }
 
 export interface UpcomingBill {

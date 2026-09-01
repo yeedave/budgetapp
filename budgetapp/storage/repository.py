@@ -30,6 +30,10 @@ class Repository:
     def __init__(self, db_path: Path):
         self._db_path = db_path
         self._local = threading.local()
+        # When True, mutation methods skip writing to activity_log — used during
+        # undo_activity() so an undo doesn't create a fresh log entry that would
+        # itself be undoable.
+        self._suppress_log = False
         # Run migrations once at startup (connection closed after GC)
         init_db(db_path)
 
@@ -80,8 +84,9 @@ class Repository:
                 return {"id": r["id"], "description": r["description"], "date": r["date"]}
         return None
 
-    def upsert_transactions(self, df: pd.DataFrame, user: str = "dave") -> int:
-        """Insert parsed DataFrame rows; skip duplicates. Returns count inserted."""
+    def upsert_transactions(self, df: pd.DataFrame, user: str = "dave") -> list[str]:
+        """Insert parsed DataFrame rows; skip duplicates.
+        Returns a list of transaction IDs that were newly inserted (len() = count)."""
         rows = []
         seen_ids: set[str] = set()  # IDs used so far in this batch
         for _, row in df.iterrows():
@@ -126,14 +131,24 @@ class Repository:
         else:
             new_with_cat = []
 
-        before = self.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+        # Snapshot pre-existing IDs so we can identify which rows are new
+        candidate_ids = [r[0] for r in rows]
+        placeholders = ','.join('?' * len(candidate_ids)) if candidate_ids else ''
+        existing_before = set()
+        if candidate_ids:
+            existing_before = {
+                r[0] for r in self.conn.execute(
+                    f"SELECT id FROM transactions WHERE id IN ({placeholders})",
+                    candidate_ids,
+                ).fetchall()
+            }
         self.conn.executemany(
             """INSERT OR IGNORE INTO transactions
                (id, date, description, raw_description, amount, account_id, category_id, user)
                VALUES (?,?,?,?,?,?,?,?)""",
             rows,
         )
-        after = self.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+        newly_inserted = [tid for tid in candidate_ids if tid not in existing_before]
 
         # Fire balance adjustments for newly inserted rows (savings split + debt tracking on import)
         acct_type_cache: dict[str, str] = {}
@@ -145,7 +160,7 @@ class Repository:
             self._adjust_linked_balance(cat, Decimal(amount_str), from_sav)
 
         self.conn.commit()
-        return after - before
+        return newly_inserted
 
     def get_transactions(
         self,
@@ -177,7 +192,7 @@ class Repository:
         its amount. If the transaction is linked to a debt or savings tracker via
         its category, the balance is adjusted to stay consistent."""
         row = self.conn.execute(
-            "SELECT amount, category_id, account_id FROM transactions WHERE id = ?", (tx_id,)
+            "SELECT amount, category_id, account_id, description FROM transactions WHERE id = ?", (tx_id,)
         ).fetchone()
         if not row:
             return
@@ -195,6 +210,13 @@ class Repository:
             # delta = new - old = -2*old; this both reverses the original adjustment
             # and applies the new one in a single call
             self._adjust_linked_balance(row["category_id"], new_amount - old_amount, from_sav)
+        if not self._suppress_log:
+            direction = f"{old_amount} → {new_amount}"
+            self._log_activity(
+                "flip_sign",
+                f"Flipped sign on {row['description'][:60]}: {direction}",
+                {"tx_id": tx_id},
+            )
         self.conn.commit()
 
     def set_category(self, tx_id: str, category_id: str) -> list[str]:
@@ -206,6 +228,8 @@ class Repository:
                WHERE t.id = ?""",
             (tx_id,),
         ).fetchone()
+        # Track category history for undo — record every affected tx's old cat
+        changes: list[dict] = [{"tx_id": tx_id, "old_category": row["category_id"] if row else None}]
         self.conn.execute("UPDATE transactions SET category_id = ? WHERE id = ?", (category_id or None, tx_id))
         updated_ids = [tx_id]
         if row:
@@ -226,6 +250,7 @@ class Repository:
                         (tx_id, row["description"]),
                     ).fetchall()
                     for m in matching:
+                        changes.append({"tx_id": m["id"], "old_category": None})
                         self.conn.execute(
                             "UPDATE transactions SET category_id = ? WHERE id = ?",
                             (category_id, m["id"]),
@@ -235,6 +260,15 @@ class Repository:
                             (m["account_type"] or "") == "savings",
                         )
                         updated_ids.append(m["id"])
+        if not self._suppress_log:
+            desc = (row["description"] if row else "") or tx_id
+            summary = (f"Categorized {len(changes)} tx" if len(changes) > 1
+                       else f"Categorized: {desc[:60]}")
+            self._log_activity(
+                "set_category",
+                summary,
+                {"changes": changes, "new_category": category_id or None},
+            )
         self.conn.commit()
         return updated_ids
 
@@ -499,19 +533,30 @@ class Repository:
                VALUES (?,?,?,?,?,?,?,?,1)""",
             (tx_id, date_str, description, description, amount_str, account_id, category_id or None, "dave"),
         )
+        newly_added = cur.rowcount > 0
         # Fire balance adjustments if this was a fresh insert with a category
         # (debt link, savings contribution, or envelope spend category).
-        if cur.rowcount > 0 and category_id:
+        if newly_added and category_id:
             acc = self.conn.execute(
                 "SELECT account_type FROM accounts WHERE id = ?", (account_id,)
             ).fetchone()
             from_sav = bool(acc and acc["account_type"] == "savings")
             self._adjust_linked_balance(category_id, Decimal(amount_str), from_sav)
+        if newly_added and not self._suppress_log:
+            self._log_activity(
+                "add_tx",
+                f"Added manual transaction: {description[:60]} ({amount_str})",
+                {"tx_id": tx_id},
+            )
         self.conn.commit()
         row = self.conn.execute("SELECT * FROM transactions WHERE id = ?", (tx_id,)).fetchone()
         return self._row_to_transaction(row)
 
     def delete_transaction(self, tx_id: str) -> None:
+        # Snapshot the full row for the activity log so undo can restore it.
+        full_row = self.conn.execute(
+            "SELECT * FROM transactions WHERE id = ?", (tx_id,)
+        ).fetchone()
         # Reverse any linked-balance adjustment before deleting so debts and
         # envelope trackers stay in sync.
         row = self.conn.execute(
@@ -524,6 +569,13 @@ class Repository:
             from_sav = bool(row["account_type"] == "savings")
             self._adjust_linked_balance(row["category_id"], -Decimal(row["amount"]), from_sav)
         self.conn.execute("DELETE FROM transactions WHERE id = ?", (tx_id,))
+        if full_row and not self._suppress_log:
+            row_dict = {k: full_row[k] for k in full_row.keys()}
+            self._log_activity(
+                "delete_tx",
+                f"Deleted transaction: {row_dict['description'][:60]} ({row_dict['amount']})",
+                {"row": row_dict},
+            )
         self.conn.commit()
 
     def find_duplicate_transactions(self) -> list[dict]:
@@ -594,7 +646,25 @@ class Repository:
 
     def delete_transactions_range(self, start_date: str, end_date: str,
                                   account_id: str | None = None) -> int:
-        before = self.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+        # Snapshot rows before delete for undo. Reverse balance adjustments too.
+        if account_id:
+            rows = self.conn.execute(
+                "SELECT * FROM transactions WHERE date >= ? AND date <= ? AND account_id = ?",
+                (start_date, end_date, account_id),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM transactions WHERE date >= ? AND date <= ?",
+                (start_date, end_date),
+            ).fetchall()
+        snapshot = [{k: r[k] for k in r.keys()} for r in rows]
+        for r in snapshot:
+            if r["category_id"]:
+                acc = self.conn.execute(
+                    "SELECT account_type FROM accounts WHERE id = ?", (r["account_id"],)
+                ).fetchone()
+                from_sav = bool(acc and acc["account_type"] == "savings")
+                self._adjust_linked_balance(r["category_id"], -Decimal(r["amount"]), from_sav)
         if account_id:
             self.conn.execute(
                 "DELETE FROM transactions WHERE date >= ? AND date <= ? AND account_id = ?",
@@ -605,9 +675,16 @@ class Repository:
                 "DELETE FROM transactions WHERE date >= ? AND date <= ?",
                 (start_date, end_date),
             )
-        after = self.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+        if snapshot and not self._suppress_log:
+            scope = f" on {account_id}" if account_id else ""
+            self._log_activity(
+                "bulk_delete",
+                f"Bulk delete: {len(snapshot)} txn{'s' if len(snapshot) != 1 else ''} "
+                f"between {start_date} and {end_date}{scope}",
+                {"rows": snapshot, "start": start_date, "end": end_date, "account_id": account_id},
+            )
         self.conn.commit()
-        return before - after
+        return len(snapshot)
 
     def _row_to_transaction(self, row: sqlite3.Row) -> Transaction:
         from datetime import date
@@ -894,6 +971,12 @@ class Repository:
                VALUES (?,?,?,?,?,'pending',?,?)""",
             (split_id, tx_id, description, owed_by, amount_owed, now, new_tx_id),
         )
+        if not self._suppress_log:
+            self._log_activity(
+                "split_create",
+                f"Split: {owed_by} owes {amount_owed} on {orig['description'][:60]}",
+                {"split_id": split_id},
+            )
         self.conn.commit()
 
         row = self.conn.execute(
@@ -1046,6 +1129,24 @@ class Repository:
         )
         self.conn.commit()
         return {"id": rid}
+
+    def update_manual_recurring(
+        self, recurring_id: str, label: str, amount: str | None, day_of_month: int,
+        interval_months: int, start_date: str, category_id: str | None,
+        frequency: str = "monthly", second_day_of_month: int | None = None,
+    ) -> dict:
+        cur = self.conn.execute(
+            """UPDATE manual_recurring SET
+                 label = ?, amount = ?, day_of_month = ?, interval_months = ?,
+                 start_date = ?, category_id = ?, frequency = ?, second_day_of_month = ?
+               WHERE id = ?""",
+            (label, amount, day_of_month, interval_months, start_date,
+             category_id, frequency or "monthly", second_day_of_month, recurring_id),
+        )
+        self.conn.commit()
+        if cur.rowcount == 0:
+            raise ValueError("Recurring entry not found")
+        return {"id": recurring_id}
 
     def delete_manual_recurring(self, recurring_id: str) -> None:
         self.conn.execute("DELETE FROM manual_recurring WHERE id = ?", (recurring_id,))
@@ -1435,13 +1536,205 @@ class Repository:
     # Import log
     # ------------------------------------------------------------------
 
-    def log_import(self, account_id: str, filename: str, inserted: int) -> None:
+    # ------------------------------------------------------------------
+    # Activity log — general audit trail with undo support
+    # ------------------------------------------------------------------
+
+    def _log_activity(self, action: str, description: str,
+                      undo_payload: dict | None = None) -> int:
+        """Append an activity entry. If undo_payload is provided, the entry
+        is undoable via undo_activity()."""
+        import json as json_mod
         from datetime import datetime
+        cur = self.conn.execute(
+            "INSERT INTO activity_log (at, action, description, undo_payload) "
+            "VALUES (?, ?, ?, ?)",
+            (datetime.now().isoformat(), action, description,
+             json_mod.dumps(undo_payload) if undo_payload else None),
+        )
+        # Don't commit here — caller's own commit will pick it up.
+        return cur.lastrowid
+
+    def get_activity_log(self, limit: int = 200) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT id, at, action, description, "
+            "       (undo_payload IS NOT NULL) AS undoable, reverted_at "
+            "FROM activity_log ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [{k: r[k] for k in r.keys()} for r in rows]
+
+    def undo_activity(self, activity_id: int) -> dict:
+        """Reverse a previously-logged action. Only entries with an
+        undo_payload can be undone; each action type has its own reversal
+        logic here."""
+        import json as json_mod
+        from datetime import datetime
+        row = self.conn.execute(
+            "SELECT action, description, undo_payload, reverted_at "
+            "FROM activity_log WHERE id = ?", (activity_id,),
+        ).fetchone()
+        if not row:
+            raise ValueError("Activity not found")
+        if row["reverted_at"]:
+            raise ValueError("This action was already undone")
+        if not row["undo_payload"]:
+            raise ValueError("This action cannot be undone")
+
+        payload = json_mod.loads(row["undo_payload"])
+        action = row["action"]
+
+        self._suppress_log = True
+        try:
+            return self._do_undo(activity_id, action, payload)
+        finally:
+            self._suppress_log = False
+
+    def _do_undo(self, activity_id: int, action: str, payload: dict) -> dict:
+        import json as json_mod
+        from datetime import datetime
+        if action == "delete_tx":
+            # Re-insert the deleted transaction row
+            r = payload["row"]
+            self.conn.execute(
+                "INSERT OR IGNORE INTO transactions "
+                "(id, date, description, raw_description, amount, account_id, "
+                " category_id, user, is_manual) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (r["id"], r["date"], r["description"], r["raw_description"],
+                 r["amount"], r["account_id"], r["category_id"], r["user"],
+                 r.get("is_manual", 0)),
+            )
+            # Re-apply balance adjustments
+            if r["category_id"]:
+                acc = self.conn.execute(
+                    "SELECT account_type FROM accounts WHERE id = ?", (r["account_id"],)
+                ).fetchone()
+                from_sav = bool(acc and acc["account_type"] == "savings")
+                self._adjust_linked_balance(r["category_id"], Decimal(r["amount"]), from_sav)
+
+        elif action == "bulk_delete":
+            # Re-insert every deleted row
+            for r in payload["rows"]:
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO transactions "
+                    "(id, date, description, raw_description, amount, account_id, "
+                    " category_id, user, is_manual) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (r["id"], r["date"], r["description"], r["raw_description"],
+                     r["amount"], r["account_id"], r["category_id"], r["user"],
+                     r.get("is_manual", 0)),
+                )
+                if r["category_id"]:
+                    acc = self.conn.execute(
+                        "SELECT account_type FROM accounts WHERE id = ?", (r["account_id"],)
+                    ).fetchone()
+                    from_sav = bool(acc and acc["account_type"] == "savings")
+                    self._adjust_linked_balance(r["category_id"], Decimal(r["amount"]), from_sav)
+
+        elif action == "set_category":
+            # Restore old category on every affected tx
+            for entry in payload["changes"]:
+                self.set_category(entry["tx_id"], entry["old_category"] or "")
+
+        elif action == "flip_sign":
+            # Flip again to restore
+            self.flip_transaction_sign(payload["tx_id"])
+
+        elif action == "add_tx":
+            # Delete the added tx
+            self.delete_transaction(payload["tx_id"])
+
+        elif action == "split_create":
+            # Reverse the split
+            self.delete_split(payload["split_id"])
+
+        else:
+            raise ValueError(f"Undo not supported for action '{action}'")
+
         self.conn.execute(
-            "INSERT INTO import_log (account_id, filename, imported_at, inserted) VALUES (?,?,?,?)",
-            (account_id, filename, datetime.now().isoformat(), inserted),
+            "UPDATE activity_log SET reverted_at = ? WHERE id = ?",
+            (datetime.now().isoformat(), activity_id),
         )
         self.conn.commit()
+        return {"undone": action}
+
+    def log_import(self, account_id: str, filename: str, inserted: int,
+                   tx_ids: list[str] | None = None) -> int:
+        """Record an import batch and return its id so callers can offer undo/move."""
+        import json
+        from datetime import datetime
+        tx_ids_json = json.dumps(tx_ids) if tx_ids else None
+        cur = self.conn.execute(
+            "INSERT INTO import_log (account_id, filename, imported_at, inserted, tx_ids) "
+            "VALUES (?,?,?,?,?)",
+            (account_id, filename, datetime.now().isoformat(), inserted, tx_ids_json),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def undo_import(self, log_id: int) -> dict:
+        """Delete every transaction that this import inserted (uses the stored
+        tx_ids list). Balance adjustments on debts/savings/envelopes are reversed
+        via delete_transaction(). Marks the log entry as reverted."""
+        import json
+        from datetime import datetime
+        row = self.conn.execute(
+            "SELECT tx_ids, reverted_at FROM import_log WHERE id = ?", (log_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError("Import not found")
+        if row["reverted_at"]:
+            raise ValueError("This import was already undone")
+        if not row["tx_ids"]:
+            raise ValueError("This import predates undo tracking — no tx_ids stored")
+        tx_ids = json.loads(row["tx_ids"])
+        deleted = 0
+        for tid in tx_ids:
+            existed = self.conn.execute(
+                "SELECT 1 FROM transactions WHERE id = ?", (tid,)
+            ).fetchone()
+            if existed:
+                self.delete_transaction(tid)
+                deleted += 1
+        self.conn.execute(
+            "UPDATE import_log SET reverted_at = ? WHERE id = ?",
+            (datetime.now().isoformat(), log_id),
+        )
+        self.conn.commit()
+        return {"deleted": deleted}
+
+    def move_import(self, log_id: int, new_account_id: str) -> dict:
+        """Reassign every transaction from this import to a different account.
+        Useful when the user picked the wrong account. Transaction IDs stay
+        stable (they include the old account_id in the hash) — we just update
+        the account_id column."""
+        import json
+        row = self.conn.execute(
+            "SELECT tx_ids, account_id, reverted_at FROM import_log WHERE id = ?", (log_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError("Import not found")
+        if row["reverted_at"]:
+            raise ValueError("Cannot move — this import was already undone")
+        if not row["tx_ids"]:
+            raise ValueError("This import predates undo tracking — no tx_ids stored")
+        if new_account_id == row["account_id"]:
+            return {"moved": 0, "note": "Already on that account"}
+        tx_ids = json.loads(row["tx_ids"])
+        moved = 0
+        for tid in tx_ids:
+            cur = self.conn.execute(
+                "UPDATE transactions SET account_id = ? WHERE id = ?",
+                (new_account_id, tid),
+            )
+            moved += cur.rowcount
+        self.conn.execute(
+            "UPDATE import_log SET account_id = ? WHERE id = ?",
+            (new_account_id, log_id),
+        )
+        self.conn.commit()
+        return {"moved": moved}
 
     def get_import_log(self, account_id: str | None = None) -> list[dict]:
         if account_id:

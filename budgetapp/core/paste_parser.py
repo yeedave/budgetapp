@@ -172,6 +172,15 @@ def parse_pasted_text(text: str) -> list[dict]:
     lines = [ln.strip() for ln in normalized.splitlines()]
     # Detect pending-transaction blocks and stamp today's date in front of them.
     lines = _preprocess_pending(lines, date_cls.today().isoformat())
+
+    # Detect Chase credit-card format vs. checking format. On CC pastes,
+    # a leading "−" means a REFUND (money back to the card) which should be
+    # positive in our sign convention. On checking pastes, a leading "−" is
+    # an outflow (negative). The distinguishing factor: checking pastes
+    # always include short type-hint lines like "Zelle debit" / "ACH credit",
+    # while CC pastes don't.
+    is_credit_card_format = not any(_is_type_hint_line(ln) for ln in lines)
+
     rows: list[dict] = []
     i, n = 0, len(lines)
 
@@ -216,7 +225,9 @@ def parse_pasted_text(text: str) -> list[dict]:
                 if sign_marker == 'positive':
                     amount = val
                 elif sign_marker == 'negative':
-                    amount = -val
+                    # On credit-card pastes, a leading "−" indicates a refund
+                    # (money back to the card) which is positive for us.
+                    amount = val if is_credit_card_format else -val
                 elif type_hint == 'credit':
                     amount = val
                 elif type_hint == 'debit':

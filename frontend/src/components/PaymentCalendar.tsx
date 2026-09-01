@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import type { Category, CalendarTx, ScheduledItem, UpcomingScheduledItem, ManualRecurring, RecurringItem } from '../types'
 import {
   getCalendarData, excludeRecurring, unexcludeRecurring, getRecurringExcluded,
-  getManualRecurring, addManualRecurring, deleteManualRecurring,
+  getManualRecurring, addManualRecurring, updateManualRecurring, deleteManualRecurring,
   detectRecurring, saveDebtDueDay,
 } from '../api'
 
@@ -171,8 +171,67 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
     await refreshUpcomingAndManual()
   }
 
+  // Inline edit for manual recurring entries
+  const [editingRecurringId, setEditingRecurringId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState({
+    label: '', amount: '', day_of_month: '1', interval_months: '1',
+    start_date: '', category_id: '',
+    frequency: 'monthly' as 'monthly' | 'biweekly' | 'semimonthly',
+    second_day_of_month: '15',
+    is_income: false,
+  })
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+
+  function startEditManual(m: ManualRecurring) {
+    const amtVal = m.amount ? parseFloat(m.amount) : 0
+    setEditingRecurringId(m.id)
+    setEditForm({
+      label: m.label,
+      amount: m.amount ? Math.abs(amtVal).toString() : '',
+      day_of_month: String(m.day_of_month),
+      interval_months: String(m.interval_months || 1),
+      start_date: m.start_date,
+      category_id: m.category_id ?? '',
+      frequency: (m.frequency as 'monthly' | 'biweekly' | 'semimonthly') ?? 'monthly',
+      second_day_of_month: m.second_day_of_month != null ? String(m.second_day_of_month) : '15',
+      is_income: amtVal > 0,
+    })
+    setEditError(null)
+  }
+
+  async function handleSaveEditManual(recurringId: string) {
+    if (!editForm.label.trim()) { setEditError('Label is required'); return }
+    const day = parseInt(editForm.day_of_month)
+    if (isNaN(day) || day < 1 || day > 31) { setEditError('Day must be 1–31'); return }
+    let secondDay: number | undefined
+    if (editForm.frequency === 'semimonthly') {
+      secondDay = parseInt(editForm.second_day_of_month)
+      if (isNaN(secondDay) || secondDay < 1 || secondDay > 31) {
+        setEditError('Second day must be 1–31'); return
+      }
+    }
+    const cleanAmount = editForm.amount.replace(/[^0-9.]/g, '')
+    const signedAmount = cleanAmount
+      ? (editForm.is_income ? cleanAmount : `-${cleanAmount}`)
+      : ''
+    setEditSaving(true)
+    setEditError(null)
+    const res = await updateManualRecurring(
+      recurringId, editForm.label, signedAmount, day,
+      parseInt(editForm.interval_months) || 1,
+      editForm.start_date, editForm.category_id,
+      editForm.frequency, secondDay,
+    )
+    setEditSaving(false)
+    if (!res.ok) { setEditError(res.error ?? 'Failed to save.'); return }
+    setEditingRecurringId(null)
+    await loadCalendar()
+    await refreshUpcomingAndManual()
+  }
+
   async function handleRemoveUpcoming(item: UpcomingScheduledItem) {
-    if (item.source === 'recurring') {
+    if (item.source === 'recurring' || item.source === 'income') {
       await excludeRecurring(item.label)
       const fresh = await getRecurringExcluded()
       setExcluded(fresh)
@@ -185,6 +244,43 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
     }
     await loadCalendar()
     await refreshUpcomingAndManual()
+  }
+
+  /** Convert an auto-detected recurring item into an editable manual entry.
+   * Adds the manual_recurring row seeded from the detected data, excludes the
+   * auto-detected pattern so it doesn't project twice, then opens the inline
+   * edit form so the user can adjust anything. */
+  async function handleEditAutoDetected(item: UpcomingScheduledItem) {
+    const amt = item.amount != null ? Math.abs(parseFloat(String(item.amount))) : 0
+    const isIncome = item.source === 'income'
+    const day = parseInt(item.date.slice(8, 10)) || 1
+    // 1. Exclude the auto-detected pattern
+    await excludeRecurring(item.label)
+    // 2. Create a manual entry with the detected data as defaults
+    const res = await addManualRecurring(
+      item.label,
+      amt ? String(amt) : '',
+      day, 1,
+      item.date, '',
+      'monthly',
+    )
+    // 3. Refresh
+    const [freshExcluded, freshManual] = await Promise.all([
+      getRecurringExcluded(), getManualRecurring(),
+    ])
+    setExcluded(freshExcluded)
+    setManualRecurring(freshManual)
+    await loadCalendar()
+    // 4. Open the edit form on the newly-created manual entry
+    if (res.ok && res.id) {
+      const newlyAdded = freshManual.find((m) => m.id === res.id)
+      if (newlyAdded) {
+        // Correct sign: manual recurring stores sign in the amount. When
+        // auto-detected income becomes manual, we want is_income = true.
+        setShowManagedRecurring(true)
+        startEditManual({ ...newlyAdded, amount: (isIncome ? amt : -amt).toString() })
+      }
+    }
   }
 
   async function openHistoryPicker() {
@@ -674,13 +770,24 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
                         {u.source === 'income' ? '+' : ''}${amt.toFixed(0)}
                       </div>
                     )}
-                    <button
-                      onClick={() => handleRemoveUpcoming(u)}
-                      title={removeTitle}
-                      className="text-xs text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all px-1 shrink-0"
-                    >
-                      ✕
-                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {(u.source === 'recurring' || u.source === 'income') && (
+                        <button
+                          onClick={() => handleEditAutoDetected(u)}
+                          title="Convert to manual so you can edit label, amount, cadence, category"
+                          className="text-xs text-gray-300 hover:text-green-700 opacity-0 group-hover:opacity-100 transition-all px-1"
+                        >
+                          ✎
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleRemoveUpcoming(u)}
+                        title={removeTitle}
+                        className="text-xs text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all px-1"
+                      >
+                        ✕
+                      </button>
+                    </div>
                   </li>
                 )
               })}
@@ -927,8 +1034,118 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
                     if (m.frequency === 'biweekly') cadence = `every 2 weeks (from ${m.start_date})`
                     else if (m.frequency === 'semimonthly') cadence = `Day ${m.day_of_month} & ${m.second_day_of_month ?? '?'}`
                     else cadence = `Day ${m.day_of_month} · ${interval?.label ?? `every ${m.interval_months}mo`}`
+                    const isEditing = editingRecurringId === m.id
+                    if (isEditing) {
+                      return (
+                        <li key={m.id} className="px-4 py-3 bg-gray-50 space-y-2">
+                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                            Editing {m.label}
+                          </div>
+                          <input
+                            value={editForm.label}
+                            onChange={(e) => setEditForm((f) => ({ ...f, label: e.target.value }))}
+                            placeholder="Label"
+                            className="w-full text-sm border rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-500"
+                          />
+                          <div className="flex gap-2">
+                            <input
+                              type="number" step="0.01"
+                              value={editForm.amount}
+                              onChange={(e) => setEditForm((f) => ({ ...f, amount: e.target.value }))}
+                              placeholder="Amount"
+                              className="flex-1 text-sm border rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-500"
+                            />
+                            <div className="flex border rounded overflow-hidden text-xs">
+                              <button type="button"
+                                onClick={() => setEditForm((f) => ({ ...f, is_income: false }))}
+                                className={`px-2 py-1 transition-colors ${!editForm.is_income ? 'bg-red-50 text-red-700 font-medium' : 'text-gray-500 hover:bg-gray-50'}`}
+                              >Expense</button>
+                              <button type="button"
+                                onClick={() => setEditForm((f) => ({ ...f, is_income: true }))}
+                                className={`px-2 py-1 transition-colors ${editForm.is_income ? 'bg-green-50 text-green-700 font-medium' : 'text-gray-500 hover:bg-gray-50'}`}
+                              >Income</button>
+                            </div>
+                          </div>
+                          <select
+                            value={editForm.frequency !== 'monthly' ? `f:${editForm.frequency}` : `m:${editForm.interval_months}`}
+                            onChange={(e) => {
+                              const [kind, val] = e.target.value.split(':')
+                              if (kind === 'f') setEditForm((f) => ({ ...f, frequency: val as 'biweekly' | 'semimonthly' }))
+                              else setEditForm((f) => ({ ...f, frequency: 'monthly', interval_months: val }))
+                            }}
+                            className="w-full text-sm border rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-500"
+                          >
+                            <option value="f:biweekly">Bi-weekly (every 2 weeks)</option>
+                            <option value="f:semimonthly">Bi-monthly (twice a month)</option>
+                            {INTERVAL_OPTIONS.map((o) => (
+                              <option key={o.value} value={`m:${o.value}`}>{o.label}</option>
+                            ))}
+                          </select>
+                          {editForm.frequency === 'monthly' && (
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="text-gray-500">Day of month:</span>
+                              <input type="number" min="1" max="31"
+                                value={editForm.day_of_month}
+                                onChange={(e) => setEditForm((f) => ({ ...f, day_of_month: e.target.value }))}
+                                className="w-20 text-sm border rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-green-500"
+                              />
+                            </div>
+                          )}
+                          {editForm.frequency === 'semimonthly' && (
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="text-gray-500">Days:</span>
+                              <input type="number" min="1" max="31"
+                                value={editForm.day_of_month}
+                                onChange={(e) => setEditForm((f) => ({ ...f, day_of_month: e.target.value }))}
+                                className="w-16 text-sm border rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-green-500"
+                              />
+                              <span className="text-gray-400">and</span>
+                              <input type="number" min="1" max="31"
+                                value={editForm.second_day_of_month}
+                                onChange={(e) => setEditForm((f) => ({ ...f, second_day_of_month: e.target.value }))}
+                                className="w-16 text-sm border rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-green-500"
+                              />
+                            </div>
+                          )}
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="text-gray-500">Start:</span>
+                            <input type="date"
+                              value={editForm.start_date}
+                              onChange={(e) => setEditForm((f) => ({ ...f, start_date: e.target.value }))}
+                              className="text-sm border rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-green-500"
+                            />
+                          </div>
+                          <select
+                            value={editForm.category_id}
+                            onChange={(e) => setEditForm((f) => ({ ...f, category_id: e.target.value }))}
+                            className="w-full text-sm border rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-500"
+                          >
+                            <option value="">— no category —</option>
+                            {BUCKET_ORDER.filter((b) => groups[b]?.length).map((b) => (
+                              <optgroup key={b} label={b.charAt(0).toUpperCase() + b.slice(1)}>
+                                {groups[b].map((c) => (
+                                  <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                              </optgroup>
+                            ))}
+                          </select>
+                          {editError && <p className="text-xs text-red-600">{editError}</p>}
+                          <div className="flex gap-2 pt-1">
+                            <button
+                              onClick={() => handleSaveEditManual(m.id)}
+                              disabled={editSaving || !editForm.label.trim()}
+                              className="flex-1 text-xs px-3 py-1.5 bg-green-700 text-white rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
+                            >{editSaving ? 'Saving…' : 'Save'}</button>
+                            <button
+                              onClick={() => setEditingRecurringId(null)}
+                              className="text-xs px-3 py-1.5 border border-gray-200 text-gray-500 rounded hover:bg-gray-100"
+                            >Cancel</button>
+                          </div>
+                        </li>
+                      )
+                    }
                     return (
-                      <li key={m.id} className="px-4 py-2 flex items-center justify-between hover:bg-gray-50">
+                      <li key={m.id} className="px-4 py-2 flex items-center justify-between hover:bg-gray-50 group">
                         <div className="min-w-0">
                           <div className="text-sm text-gray-700 truncate flex items-center gap-1">
                             {isIncome && <span className="text-green-600">💰</span>}
@@ -943,12 +1160,22 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
                             )}
                           </div>
                         </div>
-                        <button
-                          onClick={() => handleDeleteManual(m.id)}
-                          className="text-xs px-2 py-0.5 border border-gray-200 text-gray-500 rounded hover:border-red-300 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0 ml-2"
-                        >
-                          ✕
-                        </button>
+                        <div className="flex items-center gap-1 shrink-0 ml-2">
+                          <button
+                            onClick={() => startEditManual(m)}
+                            title="Edit"
+                            className="text-xs px-2 py-0.5 border border-gray-200 text-gray-500 rounded hover:border-green-400 hover:text-green-700 hover:bg-green-50 transition-colors opacity-0 group-hover:opacity-100"
+                          >
+                            ✎
+                          </button>
+                          <button
+                            onClick={() => handleDeleteManual(m.id)}
+                            title="Delete"
+                            className="text-xs px-2 py-0.5 border border-gray-200 text-gray-500 rounded hover:border-red-300 hover:text-red-600 hover:bg-red-50 transition-colors"
+                          >
+                            ✕
+                          </button>
+                        </div>
                       </li>
                     )
                   })}

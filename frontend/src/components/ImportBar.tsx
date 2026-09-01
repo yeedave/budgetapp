@@ -1,9 +1,18 @@
 import { useState, useRef, useEffect } from 'react'
 import type { Account, ImportResult } from '../types'
 import {
-  previewStatement, confirmImport,
+  previewStatement, confirmMultiImport,
   previewPastedTransactions, importPastedTransactions,
 } from '../api'
+
+interface PendingFile {
+  index: number
+  filename: string
+  detected_format?: string
+  count?: number
+  error?: string
+  account_id: string   // user's per-file assignment
+}
 
 interface Props {
   accounts: Account[]
@@ -15,9 +24,7 @@ type Phase = 'idle' | 'parsing' | 'confirming' | 'importing' | 'pasting'
 export default function ImportBar({ accounts, onImport }: Props) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [menuOpen, setMenuOpen] = useState(false)
-  const [detectedFormat, setDetectedFormat] = useState('')
-  const [count, setCount] = useState(0)
-  const [selectedId, setSelectedId] = useState('')
+  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([])
   const [status, setStatus] = useState<{ msg: string; ok: boolean } | null>(null)
 
   // Paste-flow state
@@ -58,35 +65,63 @@ export default function ImportBar({ accounts, onImport }: Props) {
       setStatus({ msg: result.error, ok: false })
       return
     }
-    setDetectedFormat(result.detected_format ?? 'Unknown format')
-    setCount(result.count ?? 0)
-    setSelectedId('')
+    const files = result.files ?? []
+    if (files.length === 0) {
+      setPhase('idle')
+      setStatus({ msg: 'No files parsed', ok: false })
+      return
+    }
+    setPendingFiles(files.map((f) => ({
+      index: f.index,
+      filename: f.filename,
+      detected_format: f.detected_format,
+      count: f.count,
+      error: f.error,
+      account_id: '',
+    })))
     setPhase('confirming')
   }
 
+  function updateFileAccount(idx: number, accountId: string) {
+    setPendingFiles((prev) => prev.map((f) =>
+      f.index === idx ? { ...f, account_id: accountId } : f
+    ))
+  }
+
+  function setAllFileAccounts(accountId: string) {
+    setPendingFiles((prev) => prev.map((f) =>
+      f.error ? f : { ...f, account_id: accountId }
+    ))
+  }
+
   async function handleConfirmPdf() {
-    if (!selectedId) return
+    const assignments = pendingFiles
+      .filter((f) => !f.error && f.account_id)
+      .map((f) => ({ index: f.index, account_id: f.account_id }))
+    if (!assignments.length) return
     setPhase('importing')
-    const result = await confirmImport(selectedId)
+    const result = await confirmMultiImport(assignments)
     setPhase('idle')
+    setPendingFiles([])
     if (result.error) {
       setStatus({ msg: result.error, ok: false })
-    } else {
-      const inserted = result.inserted ?? 0
-      const skipped = result.skipped_near_duplicates ?? 0
-      let msg: string
-      if (inserted === 0 && skipped === 0) {
-        msg = 'All transactions already imported'
-      } else if (inserted === 0) {
-        msg = `All transactions already in your data (${skipped} matched existing pending entries)`
-      } else if (skipped > 0) {
-        msg = `Imported ${inserted} new · ${skipped} matched existing pending entries`
-      } else {
-        msg = `Imported ${inserted} new transaction${inserted !== 1 ? 's' : ''}`
-      }
-      setStatus({ msg, ok: true })
-      onImport(result)
+      return
     }
+    const inserted = result.total_inserted ?? 0
+    const skipped = result.total_skipped_near_duplicates ?? 0
+    const fileCount = assignments.length
+    let msg: string
+    if (inserted === 0 && skipped === 0) {
+      msg = `All transactions from ${fileCount} file${fileCount !== 1 ? 's' : ''} already in your data`
+    } else if (inserted === 0) {
+      msg = `Nothing new — ${skipped} matched existing entries`
+    } else if (skipped > 0) {
+      msg = `Imported ${inserted} new across ${fileCount} file${fileCount !== 1 ? 's' : ''} · ${skipped} matched existing`
+    } else {
+      msg = `Imported ${inserted} new across ${fileCount} file${fileCount !== 1 ? 's' : ''}`
+    }
+    setStatus({ msg, ok: true })
+    onImport({ inserted } as ImportResult)
   }
 
   function openPaste() {
@@ -172,46 +207,87 @@ export default function ImportBar({ accounts, onImport }: Props) {
         </div>
       )}
 
-      {/* PDF confirm popover */}
+      {/* PDF confirm popover — one row per file, per-file account picker */}
       {phase === 'confirming' && (
-        <div className="absolute right-0 top-full mt-2 z-50 bg-white border border-gray-200 rounded-lg shadow-lg p-4 w-72">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Confirm Import</p>
-
-          <div className="mb-3">
-            <p className="text-xs text-gray-500 mb-1">Detected format</p>
-            <p className="text-sm font-medium text-gray-800">{detectedFormat}</p>
-            <p className="text-xs text-gray-400">{count} transaction{count !== 1 ? 's' : ''} found</p>
+        <div className={`absolute right-0 top-full mt-2 z-50 bg-white border border-gray-200 rounded-lg shadow-lg p-4 ${pendingFiles.length > 1 ? 'w-[520px]' : 'w-80'}`}>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+              Confirm Import — {pendingFiles.length} file{pendingFiles.length !== 1 ? 's' : ''}
+            </p>
+            {pendingFiles.length > 1 && (
+              <select
+                value=""
+                onChange={(e) => e.target.value && setAllFileAccounts(e.target.value)}
+                title="Assign the same account to all files"
+                className="text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                <option value="">Set all to…</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
+            )}
           </div>
 
-          <div className="mb-4">
-            <label className="text-xs text-gray-500 mb-1 block">Import into account</label>
-            <select
-              value={selectedId}
-              onChange={(e) => setSelectedId(e.target.value)}
-              className="w-full text-sm border border-gray-200 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-500"
-            >
-              <option value="">— select account —</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
+          <div className="border border-gray-100 rounded overflow-hidden divide-y divide-gray-100 mb-4 max-h-72 overflow-y-auto">
+            {pendingFiles.map((f) => (
+              <div key={f.index} className="px-3 py-2.5 flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-gray-800 truncate" title={f.filename}>
+                    {f.filename}
+                  </div>
+                  {f.error ? (
+                    <div className="text-xs text-red-600 mt-0.5">{f.error}</div>
+                  ) : (
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      {f.detected_format} · {f.count} txn{(f.count ?? 0) !== 1 ? 's' : ''}
+                    </div>
+                  )}
+                </div>
+                {!f.error && (
+                  <select
+                    value={f.account_id}
+                    onChange={(e) => updateFileAccount(f.index, e.target.value)}
+                    className={`text-xs border rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-green-500 shrink-0 w-44 ${
+                      f.account_id ? 'border-gray-200 text-gray-700' : 'border-amber-300 text-amber-800 bg-amber-50'
+                    }`}
+                  >
+                    <option value="">— pick account —</option>
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            ))}
           </div>
 
-          <div className="flex gap-2">
-            <button
-              onClick={handleConfirmPdf}
-              disabled={!selectedId}
-              className="flex-1 text-sm px-3 py-1.5 bg-green-700 text-white rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
-            >
-              Import
-            </button>
-            <button
-              onClick={handleCancel}
-              className="flex-1 text-sm px-3 py-1.5 border border-gray-200 text-gray-600 rounded hover:bg-gray-50 transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
+          {(() => {
+            const ready = pendingFiles.filter((f) => !f.error && f.account_id).length
+            const total = pendingFiles.filter((f) => !f.error).length
+            return (
+              <>
+                <div className="text-xs text-gray-500 mb-3">
+                  {ready} of {total} file{total !== 1 ? 's' : ''} ready to import
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleConfirmPdf}
+                    disabled={ready === 0}
+                    className="flex-1 text-sm px-3 py-1.5 bg-green-700 text-white rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
+                  >
+                    Import {ready} file{ready !== 1 ? 's' : ''}
+                  </button>
+                  <button
+                    onClick={() => { setPendingFiles([]); handleCancel() }}
+                    className="flex-1 text-sm px-3 py-1.5 border border-gray-200 text-gray-600 rounded hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )
+          })()}
         </div>
       )}
 

@@ -1,38 +1,97 @@
 #!/bin/bash
-# Launcher for Jade Banking — runs inside the .app bundle so macOS shows
-# the correct app name in the dock instead of "python3.12".
+# Launcher for Jade Banking — production only, no dev server.
+#
+# When you double-click a .app from Finder, macOS uses a minimal PATH that
+# doesn't include Homebrew, mamba, conda, or nvm-installed node. We have to
+# find those tools ourselves.
 
 BUNDLE="$(cd "$(dirname "$0")/../.." && pwd)"
 PROJECT="$(cd "$BUNDLE/.." && pwd)"
+LOG="$PROJECT/data/launcher.log"
+mkdir -p "$PROJECT/data"
+
+# Redirect every stdout/stderr to the log so we can post-mortem silent failures.
+exec > "$LOG" 2>&1
+set -x
 cd "$PROJECT"
+echo "=== Jade Banking launch @ $(date) ==="
+echo "Bundle: $BUNDLE"
+echo "Project: $PROJECT"
 
-# Find the mamba/conda Python for the budgetapp environment
-if command -v mamba &>/dev/null; then
-    PYTHON="mamba run -n budgetapp python"
-elif command -v conda &>/dev/null; then
-    PYTHON="conda run -n budgetapp python"
-else
-    # Fall back: try to source mamba init and use it
-    MAMBA_INIT="$HOME/mamba/etc/profile.d/conda.sh"
-    [ -f "$MAMBA_INIT" ] && source "$MAMBA_INIT" && conda activate budgetapp
-    MAMBA_INIT2="$HOME/miniforge3/etc/profile.d/conda.sh"
-    [ -f "$MAMBA_INIT2" ] && source "$MAMBA_INIT2" && conda activate budgetapp
-    PYTHON="python3"
-fi
+# ── Extend PATH with common install locations for mamba/conda/node ────────
+export PATH="\
+$HOME/mamba/bin:\
+$HOME/mamba/condabin:\
+$HOME/miniforge3/bin:\
+$HOME/miniforge3/condabin:\
+$HOME/miniconda3/bin:\
+$HOME/miniconda3/condabin:\
+$HOME/anaconda3/bin:\
+$HOME/anaconda3/condabin:\
+/opt/homebrew/bin:\
+/opt/homebrew/sbin:\
+/usr/local/bin:\
+/opt/miniconda3/bin:\
+/opt/miniconda3/condabin:\
+$PATH"
 
-# Detect dev mode: no built frontend → start Vite
-if [ ! -f "$PROJECT/frontend/dist/index.html" ]; then
-    if ! curl -s -o /dev/null http://localhost:5173 2>/dev/null; then
-        echo "Starting Vite dev server..."
-        cd "$PROJECT/frontend"
-        npm run dev &
-        for i in $(seq 1 30); do
-            curl -s -o /dev/null http://localhost:5173 && break
-            sleep 0.5
-        done
-        cd "$PROJECT"
+# ── Locate Python inside the budgetapp mamba/conda env ────────────────────
+BUDGETAPP_PY=""
+for candidate in \
+    "$HOME/mamba/envs/budgetapp/bin/python" \
+    "$HOME/miniforge3/envs/budgetapp/bin/python" \
+    "$HOME/miniconda3/envs/budgetapp/bin/python" \
+    "$HOME/anaconda3/envs/budgetapp/bin/python" \
+    "/opt/miniconda3/envs/budgetapp/bin/python" \
+    "/opt/homebrew/Caskroom/miniforge/base/envs/budgetapp/bin/python" ; do
+    if [ -x "$candidate" ]; then
+        BUDGETAPP_PY="$candidate"
+        echo "Found Python at: $candidate"
+        break
     fi
-    exec $PYTHON -m budgetapp --dev
-else
-    exec $PYTHON -m budgetapp
+done
+
+# Fall back to `mamba run -n budgetapp python` if we can't locate the interpreter
+if [ -z "$BUDGETAPP_PY" ]; then
+    if command -v mamba &>/dev/null; then
+        BUDGETAPP_PY="mamba run --live-stream -n budgetapp python"
+    elif command -v conda &>/dev/null; then
+        BUDGETAPP_PY="conda run --live-stream -n budgetapp python"
+    else
+        osascript -e 'display alert "Jade Banking couldn'\''t start" message "Could not find a Python interpreter for the '\''budgetapp'\'' env. Check ~/data/launcher.log for details." as critical'
+        exit 1
+    fi
+    echo "Falling back to: $BUDGETAPP_PY"
 fi
+
+# ── Build the production frontend if it's missing / stale ─────────────────
+DIST_INDEX="$PROJECT/frontend/dist/index.html"
+NEEDS_BUILD=0
+if [ ! -f "$DIST_INDEX" ]; then
+    NEEDS_BUILD=1
+elif [ -n "$(find "$PROJECT/frontend/src" -type f -newer "$DIST_INDEX" -print -quit 2>/dev/null)" ]; then
+    NEEDS_BUILD=1
+fi
+
+if [ "$NEEDS_BUILD" = "1" ]; then
+    if ! command -v npm &>/dev/null; then
+        # Try common node install locations
+        for np in "$HOME/.nvm/versions/node/"*/bin "/opt/homebrew/opt/node/bin" "/usr/local/bin" ; do
+            if [ -x "$np/npm" ]; then
+                export PATH="$np:$PATH"
+                break
+            fi
+        done
+    fi
+    if ! command -v npm &>/dev/null; then
+        osascript -e 'display alert "Jade Banking couldn'\''t start" message "npm was not found. Install Node.js, then reopen the app." as critical'
+        exit 1
+    fi
+    cd "$PROJECT/frontend"
+    [ ! -d node_modules ] && npm install
+    npm run build
+    cd "$PROJECT"
+fi
+
+# ── Launch the app in production mode ─────────────────────────────────────
+exec $BUDGETAPP_PY -m budgetapp

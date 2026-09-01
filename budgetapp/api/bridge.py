@@ -60,8 +60,11 @@ class Api:
     def __init__(self) -> None:
         self._repo = Repository(DB_PATH)
         self._window = None  # injected after webview.create_window
-        self._pending_df: "pd.DataFrame | None" = None
-        self._pending_path: str = ""
+        # List of parsed PDF batches waiting for the user to pick an account
+        # for each. Each entry is {"df": DataFrame, "filename": str} or None
+        # (placeholder for a file that failed to parse — keeps indexes aligned
+        # with the UI's rendered rows).
+        self._pending_files: "list[dict | None]" = []
         # Load saved API key into env so categorizer and advisor can use it
         saved = self.get_settings()
         if saved.get("anthropic_api_key") and not os.environ.get("ANTHROPIC_API_KEY"):
@@ -443,8 +446,20 @@ class Api:
         return {"inserted": 0, "error": "Use 'Import Statement' to select and assign an account."}
 
     def preview_statement(self) -> dict:
-        """Open file picker, parse PDF, store pending df — does NOT save to DB.
-        Returns detected account info and transaction count for user confirmation."""
+        """Open a multi-select file picker, parse each PDF, and store the
+        parsed frames as `self._pending_files`. Returns a per-file summary
+        so the UI can show a table and let the user pick an account for
+        each one before confirming.
+
+        Response shape:
+          {
+            "files": [
+               {"index": 0, "filename": "...", "detected_format": "...", "count": N},
+               {"index": 1, "filename": "...", "error": "..."},
+               ...
+            ]
+          }
+        """
         import webview
 
         if self._window is None:
@@ -452,101 +467,173 @@ class Api:
 
         paths = self._window.create_file_dialog(
             webview.OPEN_DIALOG,
-            allow_multiple=False,
-            file_types=("PDF files (*.pdf)",),
+            allow_multiple=True,
+            file_types=("PDF files (*.pdf;*.PDF)", "All files (*.*)"),
         )
         if not paths:
             return {"cancelled": True}
 
-        pdf_path = Path(paths[0])
-        df = None
-        last_error = "Could not detect bank or statement format. Is this a supported PDF statement?"
-        for parser_cls in _AUTO_PARSERS:
-            try:
-                candidate = parser_cls().parse(pdf_path)
-                if len(candidate) > 0:
-                    df = candidate
-                    break
-            except Exception as exc:
-                last_error = str(exc)
+        self._pending_files = []
+        files_out: list[dict] = []
+        for path in paths:
+            pdf_path = Path(path)
+            df = None
+            last_error = "Could not detect bank or statement format. Is this a supported PDF statement?"
+            for parser_cls in _AUTO_PARSERS:
+                try:
+                    candidate = parser_cls().parse(pdf_path)
+                    if len(candidate) > 0:
+                        df = candidate
+                        break
+                except Exception as exc:
+                    last_error = str(exc)
 
-        if df is None:
-            return {"error": last_error}
+            if df is None:
+                # Still add a placeholder so indexes stay aligned in the response
+                self._pending_files.append(None)
+                files_out.append({
+                    "index": len(files_out),
+                    "filename": pdf_path.name,
+                    "error": last_error,
+                })
+                continue
 
-        self._pending_df = df
-        self._pending_path = pdf_path.name
+            self._pending_files.append({"df": df, "filename": pdf_path.name})
+            files_out.append({
+                "index": len(files_out),
+                "filename": pdf_path.name,
+                "detected_format": df.attrs.get("format_name", "Unknown format"),
+                "count": len(df),
+            })
 
+        return {"files": files_out}
+
+    def _import_one_pending(self, entry: dict, account_id: str) -> dict:
+        """Insert the transactions in a single pending file under the given account.
+        Runs the shared fuzzy-dedup, categorize, upsert, and log_import pipeline.
+        Returns per-file stats."""
+        df = entry["df"].copy()
+        filename = entry["filename"]
+        df["account_id"] = account_id
+
+        # Fuzzy near-match dedup — same policy as before
+        skipped_near = 0
+        keep_mask = []
+        for _, row in df.iterrows():
+            match = self._repo.find_existing_near_match(
+                account_id,
+                row["date"].isoformat(),
+                str(row["amount"]),
+                row["description"],
+                date_window_days=3,
+            )
+            if match:
+                skipped_near += 1
+                keep_mask.append(False)
+            else:
+                keep_mask.append(True)
+        if skipped_near:
+            df = df[keep_mask].reset_index(drop=True)
+
+        df = categorize(df, self._repo,
+                        use_ai=bool(os.environ.get("ANTHROPIC_API_KEY")))
+        inserted_ids = self._repo.upsert_transactions(df)
+        inserted = len(inserted_ids)
+
+        # Marcus HYSA carries an ending balance — auto-update the savings tracker
+        ending_balance = df.attrs.get("ending_balance") if hasattr(df, "attrs") else None
+        if ending_balance and df.attrs.get("format_name") == "Marcus HYSA":
+            trackers = self._repo.get_savings_trackers()
+            linked = next(
+                (t for t in trackers if
+                 "marcus" in t["id"].lower() or "marcus" in t["name"].lower()),
+                None,
+            )
+            if linked:
+                self._repo.upsert_savings_tracker(
+                    linked["id"], linked["name"], ending_balance,
+                    linked.get("category_id"),
+                )
+
+        self._repo.log_import(
+            account_id=account_id,
+            filename=filename,
+            inserted=inserted,
+            tx_ids=inserted_ids,
+        )
         return {
-            "detected_format": df.attrs.get("format_name", "Unknown format"),
-            "count": len(df),
+            "filename": filename,
+            "inserted": inserted,
+            "skipped_near_duplicates": skipped_near,
         }
 
     def confirm_import(self, force_account_id: str = "") -> dict:
-        """Save the previously previewed statement under the given account_id."""
-        if self._pending_df is None:
+        """Single-file confirm — kept for backward compatibility with any callers
+        that still address one pending file. When multiple files are pending,
+        this applies the same account to ALL of them, which is what you want when
+        the file picker was really a single-file selection anyway."""
+        if not self._pending_files or all(f is None for f in self._pending_files):
             return {"inserted": 0, "error": "No pending import — call preview_statement first"}
         if not force_account_id:
             return {"inserted": 0, "error": "An account must be selected before importing"}
+        assignments = [
+            {"index": i, "account_id": force_account_id}
+            for i, entry in enumerate(self._pending_files) if entry is not None
+        ]
+        return self.confirm_multi_import(assignments)
 
-        df = self._pending_df.copy()
-        pdf_name = self._pending_path
-        self._pending_df = None
-        self._pending_path = ""
+    def confirm_multi_import(self, assignments: list) -> dict:
+        """Batch-confirm the pending files. `assignments` is a list of
+        {"index": int, "account_id": str}. Files without an account_id are
+        skipped. All processed entries are cleared from the pending queue."""
+        if not self._pending_files:
+            return {"total_inserted": 0, "error": "No pending import — call preview_statement first"}
 
-        df["account_id"] = force_account_id
+        results: list[dict] = []
+        total_inserted = 0
+        total_skipped_near = 0
+        errors: list[str] = []
+
+        # Copy the pending list so we can clear it before processing (avoids
+        # a partial re-import if the user rapidly re-triggers).
+        pending = self._pending_files
+        self._pending_files = []
 
         try:
-            # Filter out rows that already exist as a near-duplicate. Catches the
-            # case where a pending transaction was pasted earlier (with today's
-            # date) and the PDF later posts the real version (1-3 days later
-            # with a slightly different description).
-            skipped_near = 0
-            keep_mask = []
-            for _, row in df.iterrows():
-                match = self._repo.find_existing_near_match(
-                    force_account_id,
-                    row["date"].isoformat(),
-                    str(row["amount"]),
-                    row["description"],
-                    date_window_days=3,
-                )
-                if match:
-                    skipped_near += 1
-                    keep_mask.append(False)
-                else:
-                    keep_mask.append(True)
-            if skipped_near:
-                df = df[keep_mask].reset_index(drop=True)
+            for a in assignments:
+                try:
+                    idx = int(a.get("index", -1))
+                except (ValueError, TypeError):
+                    continue
+                account_id = a.get("account_id") or ""
+                if idx < 0 or idx >= len(pending):
+                    continue
+                entry = pending[idx]
+                if entry is None or not account_id:
+                    continue
+                try:
+                    r = self._import_one_pending(entry, account_id)
+                    total_inserted += r["inserted"]
+                    total_skipped_near += r["skipped_near_duplicates"]
+                    results.append({**r, "account_id": account_id, "ok": True})
+                except Exception as exc:
+                    errors.append(f"{entry['filename']}: {exc}")
+                    results.append({
+                        "filename": entry["filename"],
+                        "account_id": account_id,
+                        "ok": False,
+                        "error": str(exc),
+                    })
+        finally:
+            # Nothing else to clean — pending is a local now
+            pass
 
-            df = categorize(df, self._repo,
-                            use_ai=bool(os.environ.get("ANTHROPIC_API_KEY")))
-            inserted = self._repo.upsert_transactions(df)
-
-            # Auto-update savings tracker if the parser emitted an ending balance
-            # (Marcus HYSA statements carry the account's ending balance)
-            ending_balance = df.attrs.get("ending_balance")
-            if ending_balance and df.attrs.get("format_name") == "Marcus HYSA":
-                trackers = self._repo.get_savings_trackers()
-                # Match any tracker whose id or name mentions "marcus"
-                linked = next(
-                    (t for t in trackers if
-                     "marcus" in t["id"].lower() or "marcus" in t["name"].lower()),
-                    None
-                )
-                if linked:
-                    self._repo.upsert_savings_tracker(
-                        linked["id"], linked["name"], ending_balance,
-                        linked.get("category_id"),
-                    )
-
-            self._repo.log_import(
-                account_id=force_account_id,
-                filename=pdf_name,
-                inserted=inserted,
-            )
-            return {"inserted": inserted, "skipped_near_duplicates": skipped_near}
-        except Exception as exc:
-            return {"inserted": 0, "error": str(exc)}
+        return {
+            "total_inserted": total_inserted,
+            "total_skipped_near_duplicates": total_skipped_near,
+            "files": results,
+            "error": "; ".join(errors) if errors else None,
+        }
 
     # ------------------------------------------------------------------
     # Pasted transactions (copy/paste from bank website between statements)
@@ -587,11 +674,13 @@ class Api:
             df["account_id"] = account_id
             df = categorize(df, self._repo,
                             use_ai=bool(os.environ.get("ANTHROPIC_API_KEY")))
-            inserted = self._repo.upsert_transactions(df)
+            inserted_ids = self._repo.upsert_transactions(df)
+            inserted = len(inserted_ids)
             self._repo.log_import(
                 account_id=account_id,
                 filename=f"Pasted ({len(rows)} txn{'s' if len(rows) != 1 else ''})",
                 inserted=inserted,
+                tx_ids=inserted_ids,
             )
             return {
                 "inserted": inserted,
@@ -733,6 +822,36 @@ class Api:
 
     def get_import_log(self, account_id: str = "") -> list[dict]:
         return self._repo.get_import_log(account_id or None)
+
+    def undo_import(self, log_id) -> dict:
+        try:
+            result = self._repo.undo_import(int(log_id))
+            return {"ok": True, **result}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def move_import(self, log_id, new_account_id: str) -> dict:
+        try:
+            if not new_account_id:
+                return {"ok": False, "error": "Target account is required"}
+            result = self._repo.move_import(int(log_id), new_account_id)
+            return {"ok": True, **result}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def get_activity_log(self, limit: str = "200") -> list[dict]:
+        try:
+            n = int(limit)
+        except (ValueError, TypeError):
+            n = 200
+        return self._repo.get_activity_log(n)
+
+    def undo_activity(self, activity_id) -> dict:
+        try:
+            result = self._repo.undo_activity(int(activity_id))
+            return {"ok": True, **result}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     # ------------------------------------------------------------------
     # Categorization rules
@@ -936,6 +1055,58 @@ class Api:
                 second_day_of_month=second_day,
             )
             return {"ok": True, "id": result["id"]}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def update_manual_recurring(
+        self, recurring_id: str, label: str, amount: str, day_of_month, interval_months,
+        start_date: str, category_id: str,
+        frequency: str = "monthly", second_day_of_month=None,
+    ) -> dict:
+        try:
+            day = int(day_of_month)
+            if not (1 <= day <= 31):
+                return {"ok": False, "error": "Day must be between 1 and 31"}
+            interval = int(interval_months) if interval_months else 1
+            if interval < 1:
+                interval = 1
+            if not label.strip():
+                return {"ok": False, "error": "Label is required"}
+            if not start_date:
+                from datetime import date
+                start_date = date.today().isoformat()
+
+            freq = (frequency or "monthly").lower()
+            if freq not in ("monthly", "biweekly", "semimonthly"):
+                freq = "monthly"
+
+            second_day = None
+            if freq == "semimonthly":
+                try:
+                    second_day = int(second_day_of_month) if second_day_of_month else None
+                except (ValueError, TypeError):
+                    second_day = None
+                if second_day is None or not (1 <= second_day <= 31):
+                    return {"ok": False, "error": "Second day must be between 1 and 31 for semi-monthly"}
+
+            clean_amount: str | None
+            if amount in (None, "", "0"):
+                clean_amount = None
+            else:
+                clean_amount = str(_to_float(amount))
+
+            self._repo.update_manual_recurring(
+                recurring_id=recurring_id,
+                label=label.strip(),
+                amount=clean_amount,
+                day_of_month=day,
+                interval_months=interval,
+                start_date=start_date,
+                category_id=category_id or None,
+                frequency=freq,
+                second_day_of_month=second_day,
+            )
+            return {"ok": True}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 

@@ -1,4 +1,4 @@
-import type { Account, Category, Transaction, ImportResult, DebtItem, DebtPlan, SavingsTracker, ProgressData, Rule, BudgetSnapshot, NetWorth, MonthlyTrends, RecurringItem, UpcomingBill, Split, ImportLogEntry, BudgetGuideData, CalendarData, GenerateRulesResult, CategorySuggestion, RuleSuggestion, UpcomingScheduledItem, ManualRecurring } from './types'
+import type { Account, Category, Transaction, ImportResult, DebtItem, DebtPlan, SavingsTracker, ProgressData, Rule, BudgetSnapshot, NetWorth, MonthlyTrends, RecurringItem, UpcomingBill, Split, ImportLogEntry, ActivityLogEntry, BudgetGuideData, CalendarData, GenerateRulesResult, CategorySuggestion, RuleSuggestion, UpcomingScheduledItem, ManualRecurring } from './types'
 
 // Extend Window with the pywebview API shape
 interface PywebviewApi {
@@ -8,7 +8,17 @@ interface PywebviewApi {
   get_transactions: (account_id: string, month: string) => Promise<Transaction[]>
   import_statement: (account_id: string) => Promise<ImportResult>
   import_any_statement: () => Promise<ImportResult>
-  preview_statement: () => Promise<{ detected_format?: string; count?: number; cancelled?: boolean; error?: string }>
+  preview_statement: () => Promise<{
+    files?: { index: number; filename: string; detected_format?: string; count?: number; error?: string }[]
+    cancelled?: boolean
+    error?: string
+  }>
+  confirm_multi_import: (assignments: { index: number; account_id: string }[]) => Promise<{
+    total_inserted: number
+    total_skipped_near_duplicates?: number
+    files?: { filename: string; account_id: string; inserted: number; skipped_near_duplicates?: number; ok: boolean; error?: string }[]
+    error?: string | null
+  }>
   confirm_import: (force_account_id: string) => Promise<ImportResult>
   preview_pasted_transactions: (text: string) => Promise<{ count: number; transactions: { date: string; description: string; amount: string }[]; error?: string }>
   import_pasted_transactions: (text: string, account_id: string) => Promise<{ inserted: number; parsed?: number; skipped_near_duplicates?: number; error?: string }>
@@ -58,6 +68,7 @@ interface PywebviewApi {
   unexclude_recurring: (normalized_description: string) => Promise<{ ok: boolean; error?: string }>
   get_manual_recurring: () => Promise<ManualRecurring[]>
   add_manual_recurring: (label: string, amount: string, day_of_month: string, interval_months: string, start_date: string, category_id: string, frequency?: string, second_day_of_month?: string) => Promise<{ ok: boolean; id?: string; error?: string }>
+  update_manual_recurring: (recurring_id: string, label: string, amount: string, day_of_month: string, interval_months: string, start_date: string, category_id: string, frequency?: string, second_day_of_month?: string) => Promise<{ ok: boolean; error?: string }>
   delete_manual_recurring: (recurring_id: string) => Promise<{ ok: boolean; error?: string }>
   get_upcoming_scheduled: (days_ahead: string) => Promise<UpcomingScheduledItem[]>
   get_upcoming_bills: () => Promise<UpcomingBill[]>
@@ -67,6 +78,10 @@ interface PywebviewApi {
   delete_split: (split_id: string) => Promise<void>
   save_debt_due_day: (debt_id: string, due_day: number | null) => Promise<void>
   get_import_log: (account_id: string) => Promise<ImportLogEntry[]>
+  undo_import: (log_id: number) => Promise<{ ok: boolean; deleted?: number; error?: string }>
+  move_import: (log_id: number, new_account_id: string) => Promise<{ ok: boolean; moved?: number; error?: string }>
+  get_activity_log: (limit: string) => Promise<ActivityLogEntry[]>
+  undo_activity: (activity_id: number) => Promise<{ ok: boolean; undone?: string; error?: string }>
   get_budget_guide: () => Promise<BudgetGuideData>
   get_orphaned_account_ids: () => Promise<{ account_id: string; tx_count: number }[]>
   delete_transactions_for_account: (account_id: string) => Promise<{ ok: boolean; deleted: number }>
@@ -106,6 +121,8 @@ export const importStatement = (accountId: string) =>
 export const importAnyStatement = () => api().import_any_statement()
 export const previewStatement = () => api().preview_statement()
 export const confirmImport = (forceAccountId = '') => api().confirm_import(forceAccountId)
+export const confirmMultiImport = (assignments: { index: number; account_id: string }[]) =>
+  api().confirm_multi_import(assignments)
 export const previewPastedTransactions = (text: string) => api().preview_pasted_transactions(text)
 export const importPastedTransactions = (text: string, accountId: string) => api().import_pasted_transactions(text, accountId)
 export const setCategory = (txId: string, categoryId: string) =>
@@ -186,6 +203,16 @@ export const addManualRecurring = (
   label, amount, String(dayOfMonth), String(intervalMonths), startDate, categoryId,
   frequency, secondDayOfMonth != null ? String(secondDayOfMonth) : '',
 )
+export const updateManualRecurring = (
+  id: string,
+  label: string, amount: string, dayOfMonth: number, intervalMonths: number,
+  startDate: string, categoryId: string,
+  frequency: 'monthly' | 'biweekly' | 'semimonthly' = 'monthly',
+  secondDayOfMonth?: number,
+) => api().update_manual_recurring(
+  id, label, amount, String(dayOfMonth), String(intervalMonths), startDate, categoryId,
+  frequency, secondDayOfMonth != null ? String(secondDayOfMonth) : '',
+)
 export const deleteManualRecurring = (id: string) => api().delete_manual_recurring(id)
 export const getUpcomingScheduled = (daysAhead = 60) => api().get_upcoming_scheduled(String(daysAhead))
 export const getUpcomingBills = () => api().get_upcoming_bills()
@@ -195,6 +222,10 @@ export const settleSplit = (splitId: string) => api().settle_split(splitId)
 export const deleteSplit = (splitId: string) => api().delete_split(splitId)
 export const saveDebtDueDay = (debtId: string, dueDay: number | null) => api().save_debt_due_day(debtId, dueDay)
 export const getImportLog = (accountId = '') => api().get_import_log(accountId)
+export const undoImport = (logId: number) => api().undo_import(logId)
+export const moveImport = (logId: number, newAccountId: string) => api().move_import(logId, newAccountId)
+export const getActivityLog = (limit = 200) => api().get_activity_log(String(limit))
+export const undoActivity = (activityId: number) => api().undo_activity(activityId)
 export const getBudgetGuide = () => api().get_budget_guide()
 export const getOrphanedAccountIds = () => api().get_orphaned_account_ids()
 export const deleteTransactionsForAccount = (accountId: string) => api().delete_transactions_for_account(accountId)

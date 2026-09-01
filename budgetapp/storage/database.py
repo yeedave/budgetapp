@@ -105,6 +105,19 @@ CREATE TABLE IF NOT EXISTS splits (
     created_at      TEXT NOT NULL
 );
 
+-- General activity log — records every meaningful mutation so the user has
+-- an audit trail and can undo destructive actions (deletes, bulk deletes,
+-- category changes, sign flips). Not every action supports undo — see
+-- `undo_payload` (null = view-only entry).
+CREATE TABLE IF NOT EXISTS activity_log (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    at            TEXT NOT NULL,
+    action        TEXT NOT NULL,        -- 'delete_tx' | 'set_category' | 'flip_sign' | 'bulk_delete' | 'add_tx' | 'split_create' | 'split_delete' | ...
+    description   TEXT NOT NULL,        -- human-readable summary
+    undo_payload  TEXT,                 -- JSON with data needed to reverse the action, or NULL if not undoable
+    reverted_at   TEXT
+);
+
 -- User-managed list of normalized descriptions that detect_recurring should ignore.
 -- Used when a transaction looks recurring statistically but the user knows it isn't
 -- (e.g. occasional fast food).
@@ -374,6 +387,13 @@ def _migrate_import_log(conn: sqlite3.Connection) -> None:
             inserted    INTEGER NOT NULL DEFAULT 0
         )
     """)
+    # tx_ids stores a JSON array of transaction IDs inserted by this batch —
+    # needed to undo/move the import. reverted_at marks an undone import.
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(import_log)").fetchall()]
+    if "tx_ids" not in cols:
+        conn.execute("ALTER TABLE import_log ADD COLUMN tx_ids TEXT")
+    if "reverted_at" not in cols:
+        conn.execute("ALTER TABLE import_log ADD COLUMN reverted_at TEXT")
 
 
 def _migrate_account_customization(conn: sqlite3.Connection) -> None:

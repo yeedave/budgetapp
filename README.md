@@ -9,14 +9,18 @@ Everything runs locally on your computer — no cloud, no subscription, no bank 
 ## What it does
 
 - **Reads PDF bank statements** from Chase, Wells Fargo, Apple Card, and Marcus HYSA
-- **Paste transactions from bank websites** for same-day updates between statements (Chase posted, Chase pending, Wells Fargo, Chase joint checking)
+- **Multi-file import** — select several PDFs at once, pick an account per file (or "Set all to…" if they're all the same account), and import in one batch
+- **Paste transactions from bank websites** for same-day updates between statements — Chase posted / pending / joint checking and Wells Fargo credit card / checking
 - **Auto-categorizes transactions** using rules it learns from you over time
 - **Detects recurring bills** (rent, car payments, utilities, subscriptions) with smart filtering — utilities can vary month-to-month, but variable everyday charges (Target, restaurants) won't be falsely flagged
-- **Payment calendar** with bi-weekly / semi-monthly / monthly recurring entries, paydays in green, cash-needed total for the rest of the month, and one-click remove
+- **Payment calendar** with bi-weekly / semi-monthly / monthly recurring entries, paydays in green, cash-needed total for the rest of the month, and per-row edit and remove
+- **Editable recurring payments** — click ✎ to edit label, amount, cadence, category on any manual entry. Auto-detected entries can also be edited (converts them to manual, seeded with the detected values).
 - **Envelope-style savings trackers** — save for specific goals (e.g. "Daughter Fund") with spend-categories that automatically deduct from the envelope when you buy on the linked card
 - **Multiple trackers per real account** — see a total that should match your bank balance
-- **Income / expense toggle** on every transaction row — flip with one click if a sign came in wrong
-- **Manual splits** that split a transaction into two real transactions (your share + someone-else-owes-you), categorized so the split doesn't inflate your spending
+- **Clickable amount to flip income/expense** — click the dollar figure on any transaction row (Transactions tab or Dashboard drill-down) to flip its sign
+- **Manual splits** that divide a transaction into two real transactions (your share + someone-else-owes-you), categorized so the split doesn't inflate your spending
+- **Full audit trail** — every meaningful mutation is logged in **Settings → Activity Log** with per-action undo where possible (deletes, category changes, sign flips, bulk deletes, splits, and manual adds all reversible in one click)
+- **Import History with Undo / Move** — if you accidentally imported a statement to the wrong account, one click either **moves** every transaction from that batch to a different account or **undoes** the import entirely
 - **Plans debt payoff** using Avalanche or Snowball strategies
 - **Tracks net worth** across accounts, savings, and assets
 - **Asks Claude** financial questions about your real data (optional AI feature)
@@ -47,10 +51,11 @@ Before importing any statements, you need to tell the app about your accounts.
 Click **Import Statement ▾** in the top bar. You get two options:
 
 **Upload PDF statement** — for the official monthly statement once it's released
-1. A file picker opens — select a PDF statement you downloaded
-2. The app detects which bank it's from automatically
-3. A dropdown appears — **choose which account this statement belongs to**
-4. Click **Import** — all transactions are read and saved
+1. A file picker opens — Cmd+click or Shift+click to select **one or more** PDF statements
+2. The app parses each one and auto-detects the bank
+3. A popover appears with a row per file: filename · detected format · transaction count · account picker
+4. Pick an account for each file (or use "Set all to…" if they all belong to the same account)
+5. Click **Import N files** — every file is processed in one batch
 
 **Paste transactions** — for mid-month updates between statements
 1. Open your bank's website, find the transactions table, select the rows you want, copy them
@@ -61,6 +66,8 @@ Click **Import Statement ▾** in the top bar. You get two options:
 Supports both Chase formats (posted and pending) and Wells Fargo's transaction-table format. Pending entries get assigned today's date and are auto-merged when the posted version eventually arrives in the PDF.
 
 > **Safe to re-import:** Duplicates are detected automatically. Same statement imported twice → no double-counting. Pasted pending entries that later post on the PDF (within ±3 days, same amount, similar description) are caught by fuzzy matching.
+>
+> **Wrong account?** Go to **Settings → Import History**. Every import is listed with its target account, and you can either **Move** the whole batch to a different account or **Undo** the import entirely (deletes every row it inserted and restores any linked balance adjustments).
 
 ### Step 5 — Categorize your transactions
 
@@ -135,10 +142,10 @@ Your financial snapshot for the selected month.
 - **Summary cards** — total income, total expenses, net (income minus expenses). Savings is excluded from these — tracked separately.
 - **Budget tracker** — progress bars for each category you've set a budget on. When you view "All months" the targets are automatically scaled by the number of months in view.
 - **Monthly trends** — chart showing income and spending over the last 12 months
-- **Drill-down** — click any category bar to see its transactions. Each row has hover actions:
-  - **⇅ Flip sign** — toggle between income and expense (great for fixing a mis-imported sign)
-  - **⎘ Split** — split into two transactions with someone else owing part
-  - **✕ Delete** — remove the transaction
+- **Drill-down** — click any category bar to see its transactions. Each row has:
+  - **Click the amount** — toggles between income and expense in one click (fixes a mis-imported sign)
+  - **⎘ Split** (on hover) — split into two transactions with someone else owing part
+  - **✕ Delete** (on hover) — remove the transaction
 
 ### Transactions
 
@@ -148,8 +155,7 @@ The full list of every transaction, with controls to manage them.
 - **Sort** — click any column header to sort by date, description, amount, account, or category
 - **Category dropdown** — click the category cell on any row to reassign it. Changing one transaction auto-updates all other transactions with the same description.
 - **Add Transaction** — manually add a transaction that wasn't on a statement
-- **Edit amount** — click an amount to edit it inline (manual transactions only)
-- **⇅ Flip sign** — convert income ↔ expense in one click. Adjusts any linked debt/savings tracker balance to stay consistent.
+- **Click the amount** — flips the sign (income ↔ expense) on any transaction row. Adjusts any linked debt/savings tracker balance to stay consistent. For manual transactions, a small ✎ pencil appears on hover to edit the numeric value.
 - **↔ Split** — split a transaction into two (your share + someone-else-owes)
 - **✕ Delete** — remove a transaction; reverses any balance adjustments
 - **Find Duplicates** — scans for transactions imported more than once (fuzzy matching by date, amount, and description)
@@ -202,7 +208,10 @@ A month-grid view of every payment, both past and projected.
 
 - **Color coding**: orange = debt due dates, blue = auto-detected recurring, purple = manual recurring, green = income / paydays
 - **Cash needed** card (right sidebar) — total expected outflow for the rest of the current month, with breakdown by source and expected incoming income shown separately
-- **Upcoming Payments** list — follows the month you're navigated to. Hover any row to see an ✕ remove button (clears the debt's due day, deletes the manual entry, or excludes the auto-detected pattern)
+- **Upcoming Payments** list — follows the month you're navigated to. Hover any row to see two buttons:
+  - **✎ Edit** (on manual entries) — opens an inline edit form for label, amount, cadence, day, category
+  - **✎ Edit** (on auto-detected entries) — converts the auto-detected pattern to a manual entry pre-filled with the detected values, so you can adjust anything and stop the double-projection
+  - **✕ Remove** — clears the debt's due day, deletes the manual entry, or excludes the auto-detected pattern
 - **+ Add recurring payment** — schedule any kind of cadence:
   - **Bi-weekly** (every 2 weeks) — great for bi-weekly paychecks
   - **Bi-monthly / Semi-monthly** (twice a month on configurable days, default 1st and 15th)
@@ -253,7 +262,11 @@ Step-by-step help for getting the most out of the app. Includes:
 - **API key** — enter your Anthropic API key to enable AI categorization and the Advisor
 - **Claude model** — choose which Claude model to use
 - **Backup** — export all your data to a JSON file. Import it to restore.
-- **Savings trackers** — manual balance trackers for savings goals (e.g. emergency fund, vacation fund)
+- **Auto-backup** — every time the app launches, if the current month doesn't already have a backup, one is written to `data/backups/`
+- **Import History** — every import batch (PDF or paste) with its target account, filename, count, and timestamp. Each row has two actions:
+  - **Move** — reassign every transaction from that batch to a different account (fix a wrong-account import in one click)
+  - **Undo** — delete every transaction the batch inserted; linked debt and savings-tracker balances are restored automatically
+- **Activity Log** — every mutation across the app (deletes, categorization, sign flips, bulk deletes, splits, manual adds), each labeled with an action tag and a timestamp. Rows tagged as undoable have a one-click undo button that reverses the action and re-applies any balance adjustments. Undone entries stay in the log with strikethrough for the record.
 - **Prize fund** — configure what % of freed minimums rolls into your prize fund when a debt is paid off
 - **Danger zone** — reset transactions only (keeps categories and rules), or full factory reset
 

@@ -636,7 +636,6 @@ export default function TransactionTable({
                 </th>
                 <th className="px-4 py-3 w-8" />
                 <th className="px-4 py-3 w-8" />
-                <th className="px-4 py-3 w-8" />
               </tr>
             </thead>
             <tbody>
@@ -673,16 +672,26 @@ export default function TransactionTable({
                             />
                           </div>
                         ) : (
-                          <span
-                            className={`font-medium tabular-nums whitespace-nowrap ${negative ? 'text-red-600' : 'text-green-600'} ${tx.is_manual ? 'cursor-pointer hover:underline' : ''}`}
-                            title={tx.is_manual ? 'Click to edit amount' : undefined}
-                            onClick={() => {
-                              if (!tx.is_manual) return
-                              setEditingAmountId(tx.id)
-                              setEditingAmountVal(Math.abs(parseFloat(tx.amount)).toFixed(2))
-                            }}
-                          >
-                            {negative ? `−${text.replace('-', '')}` : text}
+                          <span className="inline-flex items-center gap-1 group/amt">
+                            <button
+                              onClick={() => handleFlipSign(tx)}
+                              title={negative ? 'Currently an expense — click to switch to income' : 'Currently income — click to switch to expense'}
+                              className={`font-medium tabular-nums whitespace-nowrap cursor-pointer hover:underline decoration-dotted ${negative ? 'text-red-600' : 'text-green-600'}`}
+                            >
+                              {negative ? `−${text.replace('-', '')}` : text}
+                            </button>
+                            {tx.is_manual && (
+                              <button
+                                onClick={() => {
+                                  setEditingAmountId(tx.id)
+                                  setEditingAmountVal(Math.abs(parseFloat(tx.amount)).toFixed(2))
+                                }}
+                                title="Edit amount value"
+                                className="text-xs text-gray-300 hover:text-gray-700 opacity-0 group-hover/amt:opacity-100 transition-all"
+                              >
+                                ✎
+                              </button>
+                            )}
                           </span>
                         )}
                       </td>
@@ -707,15 +716,6 @@ export default function TransactionTable({
                       </td>
                       <td className="px-2 py-2.5">
                         <button
-                          onClick={() => handleFlipSign(tx)}
-                          className={`text-sm transition-colors ${negative ? 'text-gray-300 hover:text-green-600' : 'text-gray-300 hover:text-red-500'}`}
-                          title={negative ? 'This is an expense — flip to income' : 'This is income — flip to expense'}
-                        >
-                          ⇅
-                        </button>
-                      </td>
-                      <td className="px-2 py-2.5">
-                        <button
                           onClick={() => isSplitOpen ? setSplitOpen(null) : openSplit(tx.id)}
                           className={`text-sm transition-colors ${isSplitOpen ? 'text-green-600' : 'text-gray-300 hover:text-green-600'}`}
                           title="Split this transaction"
@@ -735,7 +735,7 @@ export default function TransactionTable({
                     </tr>
                     {isSplitOpen && (
                       <tr key={`split-${tx.id}`} className="bg-green-50 border-b">
-                        <td colSpan={8} className="px-4 py-2">
+                        <td colSpan={7} className="px-4 py-2">
                           {isSuccess ? (
                             <span className="text-sm text-green-600 font-medium">Split recorded!</span>
                           ) : (
