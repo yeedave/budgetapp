@@ -1,479 +1,391 @@
 # Jade Banking
 
-Jade Banking is a desktop app that replaces a budget spreadsheet. You download PDF statements from your bank's website, import them here, and the app automatically reads every transaction, groups them by category, and shows you exactly where your money went.
+A friendly desktop app that turns your bank statements into a budget you can actually understand. Import a PDF, and the app reads every transaction, groups them by category, and shows you exactly where your money went — right on your computer, without sending anything to the cloud.
 
-Everything runs locally on your computer — no cloud, no subscription, no bank login. Your data never leaves your machine.
-
----
-
-## What it does
-
-- **Reads PDF bank statements** from Chase, Wells Fargo, Apple Card, and Marcus HYSA
-- **Multi-file import** — select several PDFs at once, pick an account per file (or "Set all to…" if they're all the same account), and import in one batch
-- **Paste transactions from bank websites** for same-day updates between statements — Chase posted / pending / joint checking and Wells Fargo credit card / checking
-- **Auto-categorizes transactions** using rules it learns from you over time
-- **Detects recurring bills** (rent, car payments, utilities, subscriptions) with smart filtering — utilities can vary month-to-month, but variable everyday charges (Target, restaurants) won't be falsely flagged
-- **Payment calendar** with bi-weekly / semi-monthly / monthly recurring entries, paydays in green, cash-needed total for the rest of the month, and per-row edit and remove
-- **Editable recurring payments** — click ✎ to edit label, amount, cadence, category on any manual entry. Auto-detected entries can also be edited (converts them to manual, seeded with the detected values).
-- **Envelope-style savings trackers** — save for specific goals (e.g. "Daughter Fund") with spend-categories that automatically deduct from the envelope when you buy on the linked card
-- **Multiple trackers per real account** — see a total that should match your bank balance
-- **Clickable amount to flip income/expense** — click the dollar figure on any transaction row (Transactions tab or Dashboard drill-down) to flip its sign
-- **Manual splits** that divide a transaction into two real transactions (your share + someone-else-owes-you), categorized so the split doesn't inflate your spending
-- **Full audit trail** — every meaningful mutation is logged in **Settings → Activity Log** with per-action undo where possible (deletes, category changes, sign flips, bulk deletes, splits, and manual adds all reversible in one click)
-- **Import History with Undo / Move** — if you accidentally imported a statement to the wrong account, one click either **moves** every transaction from that batch to a different account or **undoes** the import entirely
-- **Plans debt payoff** using Avalanche or Snowball strategies
-- **Tracks net worth** across accounts, savings, and assets
-- **Asks Claude** financial questions about your real data (optional AI feature)
+**Everything stays on your machine.** No account logins, no cloud, no subscription. Nothing about your finances ever leaves your computer.
 
 ---
 
-## Getting started (first time)
+## Table of contents
 
-### Step 1 — Download your bank statements
-
-Log into your bank's website and download a PDF statement for each account. Most banks have a "Statements" or "Documents" section where you can download a PDF for any month. Save them somewhere easy to find (like your Downloads folder).
-
-### Step 2 — Open Jade Banking
-
-Double-click `Jade Banking.app` to open the app. On Mac it may ask you to confirm opening an app from an unidentified developer — click Open.
-
-### Step 3 — Add your accounts
-
-Before importing any statements, you need to tell the app about your accounts.
-
-1. Click the **Accounts** tab
-2. Click **Add Account**
-3. Fill in a name (e.g. "Chase Checking"), your bank name, account type (checking / credit / savings), and owner
-4. Repeat for each account you want to track
-
-### Step 4 — Import a statement
-
-Click **Import Statement ▾** in the top bar. You get two options:
-
-**Upload PDF statement** — for the official monthly statement once it's released
-1. A file picker opens — Cmd+click or Shift+click to select **one or more** PDF statements
-2. The app parses each one and auto-detects the bank
-3. A popover appears with a row per file: filename · detected format · transaction count · account picker
-4. Pick an account for each file (or use "Set all to…" if they all belong to the same account)
-5. Click **Import N files** — every file is processed in one batch
-
-**Paste transactions** — for mid-month updates between statements
-1. Open your bank's website, find the transactions table, select the rows you want, copy them
-2. Paste into the textarea
-3. The preview pane on the right shows everything the parser detected — date, description, amount
-4. Pick an account → **Import**
-
-Supports both Chase formats (posted and pending) and Wells Fargo's transaction-table format. Pending entries get assigned today's date and are auto-merged when the posted version eventually arrives in the PDF.
-
-> **Safe to re-import:** Duplicates are detected automatically. Same statement imported twice → no double-counting. Pasted pending entries that later post on the PDF (within ±3 days, same amount, similar description) are caught by fuzzy matching.
->
-> **Wrong account?** Go to **Settings → Import History**. Every import is listed with its target account, and you can either **Move** the whole batch to a different account or **Undo** the import entirely (deletes every row it inserted and restores any linked balance adjustments).
-
-### Step 5 — Categorize your transactions
-
-After importing, most transactions will be auto-categorized based on rules the app has learned. The ones it couldn't figure out will be uncategorized.
-
-- Open the **Guide** tab for a step-by-step categorization walkthrough
-- Or go to the **Transactions** tab and assign categories manually using the dropdown on each row
-- Once you categorize a transaction, the app saves a rule and will automatically categorize that description in future imports
-
-### Step 6 — Check your dashboard
-
-Open the **Dashboard** tab to see:
-- A spending donut showing your breakdown by category
-- Income, expenses, and net for the selected month
-- Budget progress bars if you've set budget targets
-- Monthly trends over time
+- [What Jade Banking does for you](#what-jade-banking-does-for-you)
+- [Installing it — Mac](#installing-it--mac)
+- [Installing it — Windows](#installing-it--windows)
+- [Your first day using it](#your-first-day-using-it)
+- [What each tab is for](#what-each-tab-is-for)
+- [Understanding the categories](#understanding-the-categories)
+- [Common questions](#common-questions)
+- [Where your data lives](#where-your-data-lives)
+- [For developers](#for-developers)
 
 ---
 
-## Using the sidebar filters
+## What Jade Banking does for you
 
-The left sidebar lets you narrow what you're looking at:
+If you've ever tried to make a budget spreadsheet and given up because it's too much work, this is for you. Jade Banking does the boring parts automatically:
 
-- **Account filter** — click an account name to see only that account's transactions. Click "All accounts" to see everything.
-- **Month filter** — click a month to filter the Dashboard and Transactions to that month. Click "All months" to see everything.
-
-> These filters affect both the Dashboard and the Transactions tab. If you can't find a transaction, the first thing to check is whether you have a filter active.
-
----
-
-## Searching for a transaction
-
-Press **Cmd+F** (Mac) or **Ctrl+F** (Windows) while on the Transactions tab to focus the search box. It searches across description, amount, category, and account name.
-
-Press **Escape** to clear the search.
+- **Reads your bank statements** — download a PDF from your bank's website, drop it into the app, and every transaction gets read in seconds. Chase, Wells Fargo, Apple Card, and Marcus HYSA are all supported.
+- **Learns your habits** — the first time you tell it "Netflix is a Streaming charge", it remembers, and every future Netflix charge gets tagged automatically.
+- **Shows you where your money goes** — a donut chart per month, budget progress bars per category, and monthly trends over time.
+- **Helps with debt** — track loans and credit cards, see a payoff plan with different strategies, and watch your progress as balances drop.
+- **Handles savings goals** — set up an "envelope" like a Daughter Fund, link expense categories to it, and any spending on those categories automatically deducts from the envelope.
+- **Reminds you what's coming up** — a payment calendar shows every bill due this month and how much cash you'll need per paycheck.
+- **Between statements? No problem** — copy-paste transactions straight from your bank's website for same-day updates.
+- **Optional AI assistant** — if you want, plug in an Anthropic API key and chat with Claude about your actual finances.
 
 ---
 
-## Understanding categories and buckets
+## Installing it — Mac
 
-Every transaction is assigned a **category** (like "Groceries" or "Netflix"). Categories belong to a **bucket** — a group that controls how the app counts that money.
+**1. Download the app**
 
-| Bucket | What it means | Examples |
-|--------|--------------|---------|
-| **Income** | Money coming in from the outside world | Paycheck, tax refund, freelance payment |
-| **Bills** | Fixed costs every month you can't easily avoid | Rent, utilities, phone, insurance, internet |
-| **Subscriptions** | Recurring services you chose and could cancel | Netflix, Spotify, gym, software |
-| **Expenses** | Variable day-to-day spending | Groceries, restaurants, gas, Amazon, shopping |
-| **Savings** | Money you're deliberately moving to save | Transfer from checking → savings account |
-| **Debts** | Payments toward loans with an outstanding balance | Car loan, student loan, personal loan |
-| **Transfers** | Money moving between accounts you already own | Paying off a credit card, savings account deposit |
+Go to the [Releases page](https://github.com/yeedave/budgetapp/releases) and click the file that ends with `JadeBanking-macos.zip` under the newest release.
 
-### The most important thing to understand: Transfers
+**2. Unzip it**
 
-**Transfers are excluded from your income and expense totals entirely.** They're not new money in, and not new money out — they're just your money moving between your own accounts.
+Double-click the zip file in your Downloads folder. That gives you `Jade Banking.app`.
 
-Two situations that confuse most people:
+**3. Move it to your Applications folder**
 
-**Paying your credit card** — When you pay your Chase Sapphire bill from Chase Checking, that payment is a Transfer. You already counted the spending when you used the card. If you mark it as an expense, you'd be double-counting every purchase.
+Drag `Jade Banking.app` into `/Applications`. That's it — it's installed.
 
-**Savings deposits** — When money arrives in your Marcus savings account, that deposit is a Transfer (it's still your money, just moved). The *outflow* from your checking account gets the Savings category. The *deposit* on the receiving side gets Transfers.
+**4. Open it for the first time**
+
+Here's the important bit — the first time you try to open the app, macOS will refuse with a message like *"Jade Banking cannot be opened because the developer cannot be verified."* This is normal. It's Apple's way of saying "we don't know who made this app." You made it (or a friend did), so this warning is a false alarm.
+
+To get past it, do this **once**:
+
+1. Open your Applications folder in Finder
+2. **Right-click** (or hold Control and click) on `Jade Banking.app`
+3. Choose **Open** from the menu
+4. A new box appears with an **Open** button — click it
+
+The app opens. From now on, you can just double-click it like any other app. macOS remembers your choice.
+
+**If macOS says the app is damaged or from an unidentified developer and won't even let you right-click Open**, run this once in Terminal to override the quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Jade Banking.app"
+```
+
+Then try again.
 
 ---
 
-## Tab-by-tab guide
+## Installing it — Windows
+
+**1. Download the app**
+
+Go to the [Releases page](https://github.com/yeedave/budgetapp/releases) and click the file that ends with `JadeBanking-windows.zip` under the newest release.
+
+**2. Unzip it**
+
+Right-click the zip in your Downloads folder → **Extract All** → pick a location (Desktop works). That gives you a folder called `Jade Banking`.
+
+**3. Move the folder somewhere permanent**
+
+Drag the `Jade Banking` folder into `C:\Program Files\` or `Documents\` — anywhere you like. Don't split it up; keep everything inside the folder together, because the `.exe` needs its neighbor files to work.
+
+**4. Open it for the first time**
+
+Double-click `Jade Banking.exe` inside that folder. The first time you run it, Windows will show a blue box titled *"Windows protected your PC"*. Again, this is normal — Windows doesn't recognize the app's publisher (there is none, because it's a free app made without a paid Microsoft certificate).
+
+To get past it, do this **once**:
+
+1. Click **More info** on the blue box
+2. A new button appears at the bottom: **Run anyway**
+3. Click it
+
+The app opens. Windows remembers, so future launches are just a double-click.
+
+**Want a shortcut on your desktop?**
+
+Right-click `Jade Banking.exe` → **Send to** → **Desktop (create shortcut)**.
+
+---
+
+## Your first day using it
+
+Follow these steps once, then day-to-day the app is basically zero effort.
+
+### Step 1 — Download a statement from your bank
+
+Log into your bank's website in a browser. Look for a **Statements** or **Documents** section. Every bank has one, usually under Accounts. Download a recent PDF statement for whichever account you want to track. Save it to your Downloads folder.
+
+### Step 2 — Add that account to Jade Banking
+
+Open the app and click the **Accounts** tab at the top. Click **+ Add Account** and fill in:
+
+- **Name**: what to call it (e.g. "Chase Checking", "Emergency Savings")
+- **Bank**: which bank (e.g. Chase, Wells Fargo, Marcus)
+- **Type**: pick one — checking, savings, or credit card
+- **Owner**: whose money this is — leave "shared" if it's joint, or type a name
+
+Click **Add**. Do this for every account you want to track. There's no limit; add as many as you like.
+
+### Step 3 — Import the PDF you downloaded
+
+Click **Import Statement ▾** in the top-right of the window. You'll see two options:
+
+- **📄 Upload PDF statement** — for the official monthly statement
+- **📋 Paste transactions** — for mid-month updates (copy from your bank's website)
+
+Click **Upload PDF statement**. A file picker opens. Find the PDF you downloaded, click it, and click **Open**.
+
+The app reads the file in a second or two, then shows you a popup with:
+
+- The filename
+- Which bank it detected
+- How many transactions it found
+- A dropdown asking which of your accounts this statement belongs to
+
+Pick the right account and click **Import N transactions**. Done — every transaction from that statement is now in the app.
+
+**Uploading multiple statements at once**: In the file picker, hold **⌘** on Mac (or **Ctrl** on Windows) and click multiple PDFs. When you click **Open**, the popup gets wider and shows one row per file with its own account picker. If they're all for the same account, use the "Set all to…" shortcut at the top-right of the popup.
+
+### Step 4 — Look at the Dashboard
+
+Click the **Dashboard** tab. This is your monthly financial snapshot:
+
+- **Spending donut** at the top — visual breakdown of where your money went
+- **Income / Expenses / Net cards** — plain numbers
+- **Budget Tracker** — if you set monthly targets, green/amber/red bars show whether you're on track
+- **Monthly trends** — the last 12 months at a glance
+
+If you're viewing "All months" in the sidebar, the trackers automatically scale their targets to the whole time range shown. If you flip to "October 2026", they scale back to a single month.
+
+### Step 5 — Fix any transactions the app couldn't categorize
+
+Some things are auto-categorized right away because the app already knows patterns like "NETFLIX" or "SPOTIFY". For everything else, click the **Transactions** tab.
+
+- Any transaction with the category showing "— uncategorized —" needs your help
+- Click the category dropdown on that row and pick the right one
+- **The app remembers** — the next time a transaction with the same description appears, it'll categorize itself
+
+The **Guide** tab has a step-by-step walkthrough that helps you burn through all the uncategorized ones quickly.
+
+That's the setup. From now on, once a month you download a statement, drag it into the app, and pick the account. Everything else happens automatically.
+
+---
+
+## What each tab is for
 
 ### Dashboard
 
-Your financial snapshot for the selected month.
+Your monthly report card. Big cards at the top show income, expenses, and what you kept. A donut chart shows where money went by category. Progress bars show whether you're staying under budget in each category.
 
-- **Spending donut** — visual breakdown of spending by bucket (bills, subscriptions, expenses, etc.)
-- **Summary cards** — total income, total expenses, net (income minus expenses). Savings is excluded from these — tracked separately.
-- **Budget tracker** — progress bars for each category you've set a budget on. When you view "All months" the targets are automatically scaled by the number of months in view.
-- **Monthly trends** — chart showing income and spending over the last 12 months
-- **Drill-down** — click any category bar to see its transactions. Each row has:
-  - **Click the amount** — toggles between income and expense in one click (fixes a mis-imported sign)
-  - **⎘ Split** (on hover) — split into two transactions with someone else owing part
-  - **✕ Delete** (on hover) — remove the transaction
+If you want to dig into a single category, **click its bar**. You'll see every transaction in it. From there you can:
+
+- **Click the dollar amount** to switch a transaction between income and expense (useful when a refund got imported as an expense)
+- **Hover a row** to see split (⎘) and delete (✕) buttons
 
 ### Transactions
 
-The full list of every transaction, with controls to manage them.
+The complete list of every transaction, ever. This is where you spend most of your time cleaning things up.
 
-- **Search** — Cmd+F / Ctrl+F to filter by description, amount, category, or account name
-- **Sort** — click any column header to sort by date, description, amount, account, or category
-- **Category dropdown** — click the category cell on any row to reassign it. Changing one transaction auto-updates all other transactions with the same description.
-- **Add Transaction** — manually add a transaction that wasn't on a statement
-- **Click the amount** — flips the sign (income ↔ expense) on any transaction row. Adjusts any linked debt/savings tracker balance to stay consistent. For manual transactions, a small ✎ pencil appears on hover to edit the numeric value.
-- **↔ Split** — split a transaction into two (your share + someone-else-owes)
-- **✕ Delete** — remove a transaction; reverses any balance adjustments
-- **Find Duplicates** — scans for transactions imported more than once (fuzzy matching by date, amount, and description)
-- **Auto-organize** — re-runs all your categorization rules against uncategorized transactions. The AI option uses Claude to categorize the remainder.
-- **Bulk Delete** — delete all transactions in a date range for a specific account (useful when removing a month you re-imported)
+- **Search** — press **⌘F** (Mac) or **Ctrl+F** (Windows) to filter by description, amount, category, or account name
+- **Sort** — click any column header to sort
+- **Change category** — the dropdown on each row. When you change one, the app auto-updates every other transaction with the same description.
+- **Click the amount** — flips between income and expense
+- **Add Transaction** — for things that didn't come through on a statement (cash purchases, Venmo transfers)
+- **Find Duplicates** — scans for the same transaction imported twice
+- **Auto-organize** — re-runs all your rules against any uncategorized transactions
 
 ### Debts
 
-Track what you owe and plan how to pay it off.
+Track what you owe and plan payoff.
 
-- **Add a debt** — name, current balance, APR, and minimum monthly payment
-- **Set a due day** — payments show on the Calendar
-- **Debt payoff planner** — enter an extra monthly payment amount to see how much faster you pay off everything using Avalanche (highest APR first) or Snowball (smallest balance first)
-- **Link a category** — link a debt to a category so payments tracked in Transactions flow into the debt balance automatically
-
-#### Savings trackers (under Debts)
-
-Envelope-style budgeting on top of your real accounts.
-
-- **Multiple trackers can share one real account** (e.g. several envelopes all sitting in a single Marcus HYSA). The page shows a **grand total** that should match the bank's actual balance — if it drifts, you can spot it and reconcile.
-- **Link a contribution category** — outflows in that category (e.g. transferring from Chase to your savings) automatically increase the tracker balance
-- **Link spend categories** — buying something with the linked expense category (e.g. "Diapers" → "Daughter Fund") automatically deducts from the tracker. The original transaction stays on your real card; only the envelope balance moves.
-- **Progress bars** — shows progress toward a goal if set, or compares balances across trackers if not
+- Add each debt with its current balance, APR, and minimum monthly payment
+- Set a due day so the calendar knows when to remind you
+- Play with the **payoff planner**: enter how much extra you can put toward debt each month and see two scenarios — Avalanche (attack highest APR first) and Snowball (attack smallest balance first)
+- **Savings trackers** live at the bottom — for money you're setting aside instead of paying off. Envelope-style: link expense categories to a tracker and spending on those categories deducts from the envelope automatically.
 
 ### Categories
 
-Manage the categories and rules that power auto-categorization.
+Where you customize how the app labels your transactions.
 
-- **Add a category** — give it a name, pick a bucket, and assign an owner (for tracking per-person spending)
-- **Edit a category** — hover the row and click the pencil icon to rename, change bucket, or change owner
-- **Budget** — set a monthly spending target per category. The Dashboard shows progress.
-- **Categorization rules** — patterns (regex) that the app matches against transaction descriptions. When a transaction description matches a pattern, it's automatically assigned to that category.
-  - The app learns rules automatically every time you manually categorize a transaction
-  - You can also add rules manually — useful for transfers, savings, and recurring payments you know about in advance
-  - Click the pencil icon on any rule to edit the pattern or change the category
-  - Rules are matched case-insensitively
+- Add new categories (e.g. "Kids' Clothes", "Coffee Habit")
+- Set a **monthly budget** on any category — the Dashboard shows how you're doing
+- Edit the **rules** that trigger auto-categorization (patterns like `NETFLIX` → Streaming)
+
+Rules can be manually added, but they're mostly created automatically as you categorize things by hand.
 
 ### Accounts
 
-Manage the accounts you track.
-
-- **Add / edit / delete** accounts
-- **Drag to reorder** — the order here controls the order in the sidebar
-- **Color picker** — assign a color to an account for visual identification
-- **Import log** — see every statement that was imported for each account, with date and transaction count
+Add, edit, delete, and reorder your accounts. Also shows an **import log** at the bottom of each account so you can see every statement you've imported into it and when.
 
 ### Calendar
 
-A month-grid view of every payment, both past and projected.
+A calendar showing every bill due this month, paydays in green, and any recurring payments the app has detected.
 
-- **Color coding**: orange = debt due dates, blue = auto-detected recurring, purple = manual recurring, green = income / paydays
-- **Cash needed** card (right sidebar) — total expected outflow for the rest of the current month, with breakdown by source and expected incoming income shown separately
-- **Upcoming Payments** list — follows the month you're navigated to. Hover any row to see two buttons:
-  - **✎ Edit** (on manual entries) — opens an inline edit form for label, amount, cadence, day, category
-  - **✎ Edit** (on auto-detected entries) — converts the auto-detected pattern to a manual entry pre-filled with the detected values, so you can adjust anything and stop the double-projection
-  - **✕ Remove** — clears the debt's due day, deletes the manual entry, or excludes the auto-detected pattern
-- **+ Add recurring payment** — schedule any kind of cadence:
-  - **Bi-weekly** (every 2 weeks) — great for bi-weekly paychecks
-  - **Bi-monthly / Semi-monthly** (twice a month on configurable days, default 1st and 15th)
-  - **Monthly / Quarterly / Semi-annual / Yearly**
-- **Income toggle** — when adding, mark income vs expense so the calendar shows paydays in green and excludes them from the "cash needed" total
-- **Pick from past transactions** button — pre-fills the form from an auto-detected recurring entry
-- **Refresh** button — re-runs auto-detection (useful after importing new statements)
-- **Smart recurring detection**: only catches items with consistent amounts (within 10%) or known utility/rent keywords. Variable everyday charges (Target, restaurants) won't be falsely flagged.
+The right sidebar has two really useful cards:
+
+- **Cash needed** — the total you need to cover the rest of this month, broken down by source (debt payments / bills / recurring / expected income)
+- **Upcoming Payments** — every bill or expected income in the month you're viewing. Hover to edit or remove.
+
+There's also an **+ Add recurring payment** panel for setting up things the app can't auto-detect (like an annual insurance bill).
 
 ### Calculator
 
-Enter a potential new monthly expense (e.g. a car payment) and see how it fits against your current budget. It compares against your actual average monthly spending from the last 3 months.
+*"Can I afford $400/mo for a new car payment?"* — this tab tells you. It compares against your actual spending patterns from the last 3 months and shows the impact on your budget.
 
 ### Progress
 
-A gamified view of your debt payoff journey.
-
-- Earn XP for every dollar of principal you pay off
-- Level up as you pay down debt
-- Prize fund — a configurable percentage of freed-up minimum payments accumulates when you pay off a debt, earmarked for something fun
+A gamified view of debt payoff — you earn XP for every dollar of principal you pay down, level up as you go, and accumulate a "prize fund" from freed-up minimum payments when you pay off a debt.
 
 ### Splits
 
-Track shared expenses — things you paid for that someone else owes you part of.
-
-- Create a split from any transaction (Transactions tab or Dashboard's category drill-down)
-- The split **actually divides the transaction into two**:
-  - Your portion stays as the original expense
-  - The "owed by [name]" portion becomes its own transaction in the Transfers / Split bucket, so it doesn't inflate your spending totals
-- Mark splits as settled when you've been paid back
-- Deleting a split restores the original transaction's full amount
+For expenses someone else owes you part of. Say you paid $80 for a dinner with a friend who owes $40. Create a split on the transaction, enter their name and the amount they owe. The transaction gets divided into two — your $40 stays as regular spending, and their $40 becomes a "Owed by [name]" transaction that doesn't count against your budget. Mark it settled when they pay you back.
 
 ### Advisor
 
-A chat interface powered by Claude that has access to your real financial data — your actual spending, debts, budgets, and categories. Ask it anything about your finances.
+An AI chatbot (Claude) that has read your actual financial data and answers questions like "should I pay off my car loan or invest that money?" or "which subscriptions could I cut?"
 
-Requires an Anthropic API key set in **Settings → Anthropic API Key**. You can get one at [console.anthropic.com](https://console.anthropic.com).
+Requires you to enter an Anthropic API key (get one at console.anthropic.com — costs a few cents per conversation). Everything stays local — the app just sends the current chat message to Anthropic, gets a reply, and shows it to you.
 
 ### Guide
 
-Step-by-step help for getting the most out of the app. Includes:
-- Plain-English explanation of every bucket
-- Step-by-step categorization of your uncategorized transactions
-- Budget setup — set monthly targets for each category based on your actual spending history
+A step-by-step categorization walkthrough. If you have a bunch of uncategorized transactions, this is the fastest way to blast through them.
 
 ### Settings
 
-- **API key** — enter your Anthropic API key to enable AI categorization and the Advisor
-- **Claude model** — choose which Claude model to use
-- **Backup** — export all your data to a JSON file. Import it to restore.
-- **Auto-backup** — every time the app launches, if the current month doesn't already have a backup, one is written to `data/backups/`
-- **Import History** — every import batch (PDF or paste) with its target account, filename, count, and timestamp. Each row has two actions:
-  - **Move** — reassign every transaction from that batch to a different account (fix a wrong-account import in one click)
-  - **Undo** — delete every transaction the batch inserted; linked debt and savings-tracker balances are restored automatically
-- **Activity Log** — every mutation across the app (deletes, categorization, sign flips, bulk deletes, splits, manual adds), each labeled with an action tag and a timestamp. Rows tagged as undoable have a one-click undo button that reverses the action and re-applies any balance adjustments. Undone entries stay in the log with strikethrough for the record.
-- **Prize fund** — configure what % of freed minimums rolls into your prize fund when a debt is paid off
-- **Danger zone** — reset transactions only (keeps categories and rules), or full factory reset
+- **Backup / Restore** — export all your data to a single JSON file. Restore from a JSON file. Do this before any big change.
+- **Import History** — every statement you've imported, listed with its account and time. If you accidentally imported a statement to the wrong account, use **Move** to relocate it, or **Undo** to delete every transaction it added.
+- **Activity Log** — every deletion, category change, sign flip, etc. Almost everything is reversible with a one-click undo.
 
 ---
 
-## Auto-categorization: how it works
+## Understanding the categories
 
-When you import a statement, every transaction goes through this pipeline:
+Every transaction gets a **category** (like "Groceries"). Categories are grouped into **buckets** — this tells the app how to treat that money on your dashboard.
 
-1. **Rule matching** — the app checks every categorization rule against the transaction description using regex (case-insensitive). The highest-priority match wins.
-2. **AI fallback** — if no rule matches AND you have an Anthropic API key configured, Claude looks at the remaining uncategorized transactions in a single batch and assigns categories.
-3. **Manual fallback** — anything still uncategorized shows up in the Transactions tab and the Guide tab for you to assign by hand.
+| Bucket | What it means | Examples |
+|--------|--------------|---------|
+| **Income** | Money coming in from outside | Paycheck, tax refund, freelance |
+| **Bills** | Fixed costs you can't easily avoid | Rent, utilities, phone, insurance |
+| **Subscriptions** | Recurring services you chose | Netflix, Spotify, gym |
+| **Expenses** | Variable day-to-day spending | Groceries, restaurants, gas |
+| **Savings** | Money you're moving to save | Transfer from checking → savings |
+| **Debts** | Payments toward loans | Car loan, student loan |
+| **Transfers** | Money moving between YOUR OWN accounts — **excluded from totals** | Credit card payment, savings deposit |
 
-Every time you manually categorize a transaction, the app saves a new rule so it won't ask again next time.
+### The one thing that trips everyone up: Transfers
 
-### Writing rules manually
+If you pay off your credit card by transferring $500 from checking to the card, that's a **Transfer**, not an expense. You already counted the $500 when you swiped the card — counting it again when you pay would double-count.
 
-Rules use regular expressions matched case-insensitively against the full transaction description. Tips:
-- Use the most distinctive part of the description: `NETFLIX` is better than `NET`
-- `.*` matches anything in between: `Online Transfer.*Marcus` matches any description containing "Online Transfer" followed anywhere by "Marcus"
-- Bank descriptions often have trailing reference numbers — use the stable prefix and let the rest match anything
+Same story with savings deposits. When money arrives in your savings account, it's a **Transfer** (your own money moved), not income.
 
----
-
-## Common problems
-
-**"My expenses look way too high"**
-A credit card payment is probably categorized as an expense. Change it to a Transfers category — you already counted the spending when you made the purchases.
-
-**"My income looks inflated"**
-A savings deposit or credit card payment is probably in the wrong category. Positive transactions in anything other than the Income bucket will inflate the income card. Find the culprit in the Transactions tab and change it to Transfers.
-
-**"I can't find a transaction"**
-Check the sidebar — you probably have a specific account or month selected. Click "All accounts" and "All months" to see everything, then use Cmd+F to search.
-
-**"The app categorized something wrong"**
-Click the category dropdown on that row in Transactions and pick the right one. The app updates all transactions with that same description automatically and saves a new rule so it won't happen again.
-
-**"I imported the wrong month"**
-Use **Transactions → Bulk Delete** to remove all transactions in a date range for a specific account, then re-import the correct statement.
+Categorize both of those as Transfers and the numbers work out.
 
 ---
 
-## Banks supported
+## Common questions
 
-| Bank / Account type | Parser |
-|---------------------|--------|
-| Chase Checking | ✅ |
-| Chase Sapphire (credit) | ✅ |
-| Wells Fargo CC | ✅ |
-| Wells Fargo Checking | ✅ |
-| Apple Card | ✅ |
-| Marcus HYSA | ✅ — also reads ending balance and auto-updates your savings tracker |
+**"My expenses look way too high on the Dashboard."**
+A credit card payment is probably showing as an expense. Change it to a Transfers category — you already counted the spending when you made the purchases.
 
-The app auto-detects the bank from the PDF format. You don't need to tell it which bank — just which account to save it under.
+**"My income looks too high."**
+A savings deposit or credit card payment is probably tagged as income. Anything positive that isn't a real paycheck should be a Transfer.
 
----
+**"I can't find a transaction I'm looking for."**
+Check the sidebar filters. You probably have a specific account or month selected. Click "All accounts" and "All months" to see everything, then use ⌘F / Ctrl+F to search.
 
-## Demo mode
+**"The app categorized something wrong."**
+Click the category dropdown on that row and pick the right one. The app updates all transactions with that same description automatically and remembers so it won't happen again.
 
-Want to show the app to a friend without exposing your real data? Demo mode ships a completely separate database with a generated, fully fictitious dataset — every merchant, payroll deposit, debt, and category is invented from a fixed random seed. Your real `data/budgetapp.db` is never opened.
+**"I imported to the wrong account."**
+Settings → Import History → find that import → click **Move**, pick the right account. Every transaction from that batch gets reassigned.
 
-**One-time setup — build the demo dataset:**
+**"I imported the same statement twice."**
+No problem — the app detects duplicates by fingerprint and won't double-count anything. Re-importing is always safe.
 
-```bash
-python -m budgetapp.tools.seed_demo
-```
+**"Something got deleted by accident."**
+Settings → Activity Log. Deletions are one-click undoable, and any linked balances get restored too.
 
-This creates `data/demo/budgetapp.db` (and its own `data/demo/settings.json`, `data/demo/backups/`) with:
+**"How do I stop tracking a subscription I canceled?"**
+Calendar tab → find the entry in Upcoming Payments → hover → click ✕. Historical transactions stay put; it just stops projecting forward.
 
-- 5 fake accounts (Primary Checking, Household Checking, Rewards Card, Cashback Card, Emergency Savings)
-- ~6 months of ~500 realistic-looking transactions across the accounts
-- Bi-weekly and semi-monthly paycheck patterns
-- Monthly bills on natural-looking due days (rent on the 1st, streaming on the 8th and 22nd, gym on the 27th, etc.)
-- Everyday variable spending (groceries, dining, gas, pets, misc)
-- Credit-card auto-payments between checking and each card
-- Category budgets so the Dashboard Budget Tracker has content
-- 3 debts (two student loans and an auto loan) and an Emergency Fund savings tracker
-
-**Launch the app in demo mode:**
-
-```bash
-python -m budgetapp --demo
-```
-
-You can also use the environment variable form, which is convenient for scripts:
-
-```bash
-JADEBANKING_DEMO=1 python -m budgetapp
-```
-
-The window title becomes **Jade Banking (Demo)** so it's obvious which database you're looking at.
-
-Re-run `python -m budgetapp.tools.seed_demo` any time to wipe and rebuild the demo dataset — completely idempotent.
+**"I moved apartments and my rent amount changed."**
+Just update the budget on the Rent category. When the first new rent transaction comes in, categorize it manually — the app learns and future imports auto-categorize.
 
 ---
 
-## Distributing to friends
+## Where your data lives
 
-You can share Jade Banking as a standalone `.app` (macOS) or `.exe` (Windows) — no Python, no mamba, no npm, no build tools required on your friends' machines.
-
-### Where user data goes on a distributed build
-
-Because packaged apps live in read-only bundles, the DB moves out of the repo when the app is packaged:
+Nothing about your finances ever leaves your machine. The database, backups, settings — all local.
 
 | Platform | Location |
 |---|---|
-| macOS | `~/Library/Application Support/JadeBanking/budgetapp.db` |
-| Windows | `%APPDATA%\JadeBanking\budgetapp.db` |
-| Linux | `~/.local/share/JadeBanking/budgetapp.db` |
+| Mac | `~/Library/Application Support/JadeBanking/` |
+| Windows | `C:\Users\<your name>\AppData\Roaming\JadeBanking\` |
+| Linux | `~/.local/share/JadeBanking/` |
 
-Backups, settings, and advisor skills go into the same directory. When you delete the app, the data stays put so nothing is lost across upgrades.
+Inside that folder:
 
-### Automatic builds via GitHub Actions
+- `budgetapp.db` — the main SQLite database (all your transactions, categories, rules)
+- `backups/` — automatic monthly backups
+- `settings.json` — your preferences (Anthropic API key, model choice)
 
-The repository ships a workflow at `.github/workflows/release.yml` that builds both Mac and Windows binaries automatically when you push a version tag:
+**Backing up manually**: Settings → **Export Backup**. You get a single JSON file with everything. Save it to Dropbox / iCloud / wherever.
 
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
+**Restoring a backup**: Settings → **Import Backup**. Pick the JSON file. Your current data gets replaced.
 
-This kicks off a matrix build on `macos-latest` and `windows-latest` runners. Both jobs:
-
-1. Install Node, run `npm ci && npm run build` on the frontend
-2. Install Python + PyInstaller
-3. Run `pyinstaller packaging/jadebanking.spec` to bundle everything
-4. Zip the resulting artifact
-5. Attach both zips to a fresh GitHub Release
-
-Your friends then download the zip for their OS, unzip, and double-click.
-
-### Local build
-
-If you'd rather build on your own machine (no CI):
-
-```bash
-mamba activate budgetapp
-pip install -e ".[packaging]"
-cd frontend && npm install && npm run build && cd ..
-pyinstaller packaging/jadebanking.spec --clean --noconfirm
-```
-
-Output goes to:
-- **macOS**: `dist/Jade Banking.app` (drag into `/Applications/` and share)
-- **Windows**: `dist/Jade Banking/` (zip the whole folder)
-
-### First-launch security prompts (no code signing)
-
-The workflow ships **unsigned** binaries — code-signing requires a paid Apple Developer ($99/yr) or Windows publisher certificate. Unsigned apps still work, they just trigger a one-time warning on first launch that your friends need to click past:
-
-**macOS Gatekeeper**
-- The first time they open the .app, macOS refuses with *"cannot be opened because the developer cannot be verified."*
-- Fix: **Right-click** the app → **Open** → click **Open** in the confirmation dialog. Once per computer.
-
-**Windows SmartScreen**
-- Windows Defender shows *"Windows protected your PC"*
-- Fix: click **More info** → **Run anyway**. Once per computer.
-
-Tell your friends to expect this — it's the "unsigned app" tax, not a bug.
-
-### To codesign & notarize properly (optional, ~$99/yr per platform)
-
-If the warnings are a dealbreaker:
-- **macOS**: enroll in the Apple Developer Program, set `codesign_identity` in `packaging/jadebanking.spec`, add a notarization step to the CI workflow
-- **Windows**: buy a code-signing certificate from Sectigo / DigiCert (~$200–500/yr), use `signtool.exe` in CI
-
-For casual "here's my app, try it" distribution to a few friends, the unsigned-with-warning path is what most indie apps do.
+**Uninstalling the app**: Move the app to Trash (Mac) or delete the folder (Windows). Your data folder stays put — deleting the app doesn't delete your data. If you want a truly clean slate, delete the data folder listed above too.
 
 ---
 
-## Developer setup
+## Try it before committing your real data — Demo mode
+
+Want to poke around and see how the app works before importing your real statements? Or show it to a friend without exposing your finances?
+
+**Demo mode** ships a completely separate, fake database. Every merchant, paycheck, and debt is invented from thin air. Your real database is never touched.
+
+To turn it on, launch the app with a `--demo` flag. On Mac:
+
+```bash
+open -a "Jade Banking" --args --demo
+```
+
+On Windows, right-click `Jade Banking.exe` → **Create shortcut**, then right-click the new shortcut → **Properties** → in the **Target** box, add ` --demo` at the end (after a space). Double-click that shortcut to launch in demo mode.
+
+The window title reads **Jade Banking (Demo)** so it's obvious you're not looking at real data. Quit the demo, launch the app normally, and everything's exactly as you left it.
+
+---
+
+## For developers
+
+If you want to run the app from source, contribute changes, or build your own binaries:
 
 ### Requirements
 
-- Python 3.12 in a mamba/conda environment named `budgetapp`
-- Node.js 18+
+- Python 3.12 (via mamba or conda)
+- Node.js 18+ (for the React frontend)
 
 ### Install
 
 ```bash
+mamba create -n budgetapp python=3.12
 mamba activate budgetapp
 pip install -e ".[dev]"
-cd frontend && npm install
+cd frontend && npm install && cd ..
 ```
 
 ### Run in development mode
 
+Two terminals:
+
 ```bash
-# Terminal 1 — Vite dev server
+# Terminal 1 — Vite dev server (frontend hot-reload)
 cd frontend && npm run dev
 
-# Terminal 2 — Python backend
+# Terminal 2 — Python backend (pywebview window loads localhost:5173)
 python -m budgetapp --dev
 ```
 
-Or use the `.app` bundle (sets the correct dock name on Mac):
+Or single-terminal with the `.app` bundle:
 
 ```bash
 open "Jade Banking.app"
-```
-
-### Build for production
-
-```bash
-cd frontend && npm run build
-python -m budgetapp
 ```
 
 ### Run tests
@@ -482,34 +394,72 @@ python -m budgetapp
 pytest
 ```
 
+### Build a distributable binary
+
+The GitHub Actions workflow (`.github/workflows/release.yml`) does this automatically when you push a version tag:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The workflow builds both `.app` (Mac) and `.exe` (Windows), zips them, and attaches to a GitHub Release. Your friends can download and install from https://github.com/yeedave/budgetapp/releases.
+
+To build locally:
+
+```bash
+mamba activate budgetapp
+pip install -e ".[packaging]"
+cd frontend && npm run build && cd ..
+pyinstaller packaging/jadebanking.spec --clean --noconfirm
+```
+
+Output goes to `dist/Jade Banking.app` (Mac) or `dist/Jade Banking/` (Windows).
+
 ### Project layout
 
 ```
 budgetapp/
-├── budgetapp/
-│   ├── main.py              — entry point, creates pywebview window
-│   ├── config/settings.py   — paths and constants
-│   ├── parsers/             — one parser per bank (pdfplumber)
+├── budgetapp/                    ← Python backend
+│   ├── main.py                    entry point, creates pywebview window
+│   ├── config/settings.py         paths and constants (dev vs packaged)
+│   ├── parsers/                   one parser per bank format (pdfplumber)
 │   ├── core/
-│   │   ├── models.py        — dataclasses
-│   │   ├── categorizer.py   — rule matching + AI fallback
-│   │   └── debt_planner.py  — Avalanche / Snowball algorithm
+│   │   ├── models.py              dataclasses
+│   │   ├── categorizer.py         rule-based + AI categorization
+│   │   ├── debt_planner.py        Avalanche / Snowball algorithms
+│   │   └── paste_parser.py        text-paste parser (Chase / WF websites)
 │   ├── storage/
-│   │   ├── database.py      — SQLite schema
-│   │   └── repository.py    — all DB reads and writes
-│   └── api/bridge.py        — every function the frontend can call
-└── frontend/                — React + Vite + Tailwind + Recharts
-    └── src/
-        ├── App.tsx           — root layout, sidebar, nav
-        ├── api.ts            — typed wrappers for every bridge call
-        ├── types.ts          — shared TypeScript types
-        └── components/       — one file per tab
+│   │   ├── database.py            SQLite schema + seed data
+│   │   └── repository.py          all DB reads and writes
+│   ├── api/bridge.py              every function the frontend can call
+│   └── tools/seed_demo.py         builds the demo dataset
+├── frontend/                     ← React + Vite + Tailwind + Recharts
+│   └── src/
+│       ├── App.tsx                root layout, sidebar, nav
+│       ├── api.ts                 typed wrappers for every bridge call
+│       ├── types.ts               shared TypeScript types
+│       └── components/            one file per tab
+├── packaging/
+│   └── jadebanking.spec           PyInstaller spec
+└── .github/workflows/release.yml  CI build for both platforms
 ```
 
 ### Notes for developers
 
 - Amount sign convention: **negative = expense**, positive = income/credit
 - Transaction IDs are `sha256(date|description|amount|account_id|seq)[:16]` — deterministic, so re-importing is safe
-- pywebview dispatches JS bridge calls from multiple threads — the repository uses `threading.local()` for SQLite connections
-- Data lives in `data/budgetapp.db` — gitignored, never committed
+- pywebview dispatches JS-bridge calls from multiple threads; `Repository` uses `threading.local()` for SQLite connections
+- Data lives in `data/budgetapp.db` in dev mode, `~/Library/Application Support/JadeBanking/budgetapp.db` when packaged
 - Restart the app (not just browser refresh) after frontend changes when running against pywebview
+
+### Banks supported
+
+| Bank / Account type | Parser |
+|---------------------|--------|
+| Chase Checking | ✅ |
+| Chase Sapphire (credit) | ✅ |
+| Wells Fargo CC | ✅ |
+| Wells Fargo Checking | ✅ |
+| Apple Card | ✅ |
+| Marcus HYSA | ✅ (also reads ending balance and auto-updates the savings tracker) |
