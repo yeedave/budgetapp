@@ -364,6 +364,80 @@ Re-run `python -m budgetapp.tools.seed_demo` any time to wipe and rebuild the de
 
 ---
 
+## Distributing to friends
+
+You can share Jade Banking as a standalone `.app` (macOS) or `.exe` (Windows) — no Python, no mamba, no npm, no build tools required on your friends' machines.
+
+### Where user data goes on a distributed build
+
+Because packaged apps live in read-only bundles, the DB moves out of the repo when the app is packaged:
+
+| Platform | Location |
+|---|---|
+| macOS | `~/Library/Application Support/JadeBanking/budgetapp.db` |
+| Windows | `%APPDATA%\JadeBanking\budgetapp.db` |
+| Linux | `~/.local/share/JadeBanking/budgetapp.db` |
+
+Backups, settings, and advisor skills go into the same directory. When you delete the app, the data stays put so nothing is lost across upgrades.
+
+### Automatic builds via GitHub Actions
+
+The repository ships a workflow at `.github/workflows/release.yml` that builds both Mac and Windows binaries automatically when you push a version tag:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+This kicks off a matrix build on `macos-latest` and `windows-latest` runners. Both jobs:
+
+1. Install Node, run `npm ci && npm run build` on the frontend
+2. Install Python + PyInstaller
+3. Run `pyinstaller packaging/jadebanking.spec` to bundle everything
+4. Zip the resulting artifact
+5. Attach both zips to a fresh GitHub Release
+
+Your friends then download the zip for their OS, unzip, and double-click.
+
+### Local build
+
+If you'd rather build on your own machine (no CI):
+
+```bash
+mamba activate budgetapp
+pip install -e ".[packaging]"
+cd frontend && npm install && npm run build && cd ..
+pyinstaller packaging/jadebanking.spec --clean --noconfirm
+```
+
+Output goes to:
+- **macOS**: `dist/Jade Banking.app` (drag into `/Applications/` and share)
+- **Windows**: `dist/Jade Banking/` (zip the whole folder)
+
+### First-launch security prompts (no code signing)
+
+The workflow ships **unsigned** binaries — code-signing requires a paid Apple Developer ($99/yr) or Windows publisher certificate. Unsigned apps still work, they just trigger a one-time warning on first launch that your friends need to click past:
+
+**macOS Gatekeeper**
+- The first time they open the .app, macOS refuses with *"cannot be opened because the developer cannot be verified."*
+- Fix: **Right-click** the app → **Open** → click **Open** in the confirmation dialog. Once per computer.
+
+**Windows SmartScreen**
+- Windows Defender shows *"Windows protected your PC"*
+- Fix: click **More info** → **Run anyway**. Once per computer.
+
+Tell your friends to expect this — it's the "unsigned app" tax, not a bug.
+
+### To codesign & notarize properly (optional, ~$99/yr per platform)
+
+If the warnings are a dealbreaker:
+- **macOS**: enroll in the Apple Developer Program, set `codesign_identity` in `packaging/jadebanking.spec`, add a notarization step to the CI workflow
+- **Windows**: buy a code-signing certificate from Sectigo / DigiCert (~$200–500/yr), use `signtool.exe` in CI
+
+For casual "here's my app, try it" distribution to a few friends, the unsigned-with-warning path is what most indie apps do.
+
+---
+
 ## Developer setup
 
 ### Requirements
