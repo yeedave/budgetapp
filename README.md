@@ -325,6 +325,45 @@ The app auto-detects the bank from the PDF format. You don't need to tell it whi
 
 ---
 
+## Demo mode
+
+Want to show the app to a friend without exposing your real data? Demo mode ships a completely separate database with a generated, fully fictitious dataset — every merchant, payroll deposit, debt, and category is invented from a fixed random seed. Your real `data/budgetapp.db` is never opened.
+
+**One-time setup — build the demo dataset:**
+
+```bash
+python -m budgetapp.tools.seed_demo
+```
+
+This creates `data/demo/budgetapp.db` (and its own `data/demo/settings.json`, `data/demo/backups/`) with:
+
+- 5 fake accounts (Primary Checking, Household Checking, Rewards Card, Cashback Card, Emergency Savings)
+- ~6 months of ~500 realistic-looking transactions across the accounts
+- Bi-weekly and semi-monthly paycheck patterns
+- Monthly bills on natural-looking due days (rent on the 1st, streaming on the 8th and 22nd, gym on the 27th, etc.)
+- Everyday variable spending (groceries, dining, gas, pets, misc)
+- Credit-card auto-payments between checking and each card
+- Category budgets so the Dashboard Budget Tracker has content
+- 3 debts (two student loans and an auto loan) and an Emergency Fund savings tracker
+
+**Launch the app in demo mode:**
+
+```bash
+python -m budgetapp --demo
+```
+
+You can also use the environment variable form, which is convenient for scripts:
+
+```bash
+JADEBANKING_DEMO=1 python -m budgetapp
+```
+
+The window title becomes **Jade Banking (Demo)** so it's obvious which database you're looking at.
+
+Re-run `python -m budgetapp.tools.seed_demo` any time to wipe and rebuild the demo dataset — completely idempotent.
+
+---
+
 ## Developer setup
 
 ### Requirements
