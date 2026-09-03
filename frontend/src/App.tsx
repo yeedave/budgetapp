@@ -132,7 +132,23 @@ export default function App() {
   const displayedTransactions = useMemo(() => {
     let txs = allTransactions
     if (selectedAccount) txs = txs.filter((t) => t.account_id === selectedAccount)
-    if (selectedMonth)   txs = txs.filter((t) => t.date.slice(0, 7) === selectedMonth)
+    if (selectedMonth) {
+      // Filter tokens:
+      //   'YYYY-MM'   → single month
+      //   'ytd:YYYY'  → January 1 of YYYY through today (for the current year)
+      //                 or the whole year (for past years — no more months coming)
+      if (selectedMonth.startsWith('ytd:')) {
+        const year = selectedMonth.slice(4)
+        const today = new Date()
+        const isCurrentYear = String(today.getFullYear()) === year
+        const end = isCurrentYear
+          ? today.toISOString().slice(0, 10)
+          : `${year}-12-31`
+        txs = txs.filter((t) => t.date >= `${year}-01-01` && t.date <= end)
+      } else {
+        txs = txs.filter((t) => t.date.slice(0, 7) === selectedMonth)
+      }
+    }
     return txs
   }, [allTransactions, selectedAccount, selectedMonth])
 
