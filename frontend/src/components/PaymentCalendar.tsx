@@ -609,16 +609,20 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
           let expenseTotal = 0
           let incomeTotal = 0
           let expenseCount = 0
+          let overdueTotal = 0
+          let overdueCount = 0
           const totalsBySource: Record<string, number> = {}
           for (const [dayStr, items] of Object.entries(scheduledByDay)) {
             const d = Number(dayStr)
-            // In the current month skip past days — they're already "spent"
-            if (isCurrentMonth && d < today.getDate()) continue
+            const isOverdue = isCurrentMonth && d < today.getDate()
             for (const s of items) {
               if (s.amount == null) continue
               const amt = Math.abs(parseFloat(String(s.amount)))
               if (s.source === 'income') {
-                incomeTotal += amt
+                if (!isOverdue) incomeTotal += amt
+              } else if (isOverdue) {
+                overdueTotal += amt
+                overdueCount += 1
               } else {
                 expenseTotal += amt
                 expenseCount += 1
@@ -656,6 +660,14 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
                     <> · <span className="text-green-600 font-medium">{currFmt.format(incomeTotal)}</span> incoming</>
                   )}
                 </div>
+                {overdueTotal > 0 && (
+                  <div className="mt-2 px-2 py-1.5 rounded bg-red-50 border border-red-100 text-xs text-red-700">
+                    <span className="font-semibold">{currFmt.format(overdueTotal)}</span> overdue
+                    <span className="text-red-500 font-normal">
+                      {' '}· {overdueCount} unpaid this month
+                    </span>
+                  </div>
+                )}
                 {total > 0 && (
                   <ul className="mt-3 space-y-1 pt-3 border-t border-gray-100">
                     {Object.entries(totalsBySource).map(([source, amt]) => {
@@ -680,19 +692,18 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
           )
         })()}
 
-        {/* Upcoming payments — items in the month currently navigated to on the calendar */}
+        {/* Upcoming payments — items in the month currently navigated to on the calendar.
+         * Past-due items in the current month are still shown (tagged "Overdue") so the
+         * user can edit or remove them when a bill didn't charge on its expected day. */}
         {(() => {
-          // Build a list of {date, label, amount, source, id} from the per-month
-          // scheduledByDay state so the list automatically follows month navigation.
           const isCurrentMonth = today.getFullYear() === year && today.getMonth() + 1 === month
           const isPastMonth = (year < today.getFullYear()) ||
             (year === today.getFullYear() && month < today.getMonth() + 1)
-          const monthItems: UpcomingScheduledItem[] = []
+          const monthItems: (UpcomingScheduledItem & { overdue?: boolean })[] = []
           for (const [dayStr, items] of Object.entries(scheduledByDay)) {
             const day = Number(dayStr)
-            // For the current month, only include from today onward
-            if (isCurrentMonth && day < today.getDate()) continue
             const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+            const overdue = isCurrentMonth && day < today.getDate()
             for (const s of items) {
               monthItems.push({
                 date: iso,
@@ -700,6 +711,7 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
                 amount: s.amount ?? null,
                 source: s.source,
                 id: null,
+                overdue,
               })
             }
           }
@@ -753,11 +765,27 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
                   : u.source === 'debt' ? 'Clear due date on this debt'
                   : u.source === 'manual' ? 'Delete this manual recurring payment'
                   : 'Stop auto-detecting this as recurring'
+                const isManual = u.source === 'manual'
+                const canConvertEdit = u.source === 'recurring' || u.source === 'income'
+                // Overdue items always show the action buttons (no hover needed) so
+                // it's clear they need attention.
+                const actionVisibility = u.overdue
+                  ? 'opacity-70 hover:opacity-100'
+                  : 'opacity-0 group-hover:opacity-100'
                 return (
-                  <li key={`${u.date}-${u.label}-${idx}`} className="px-4 py-2.5 flex items-center gap-3 hover:bg-gray-50 group">
+                  <li
+                    key={`${u.date}-${u.label}-${idx}`}
+                    className={`px-4 py-2.5 flex items-center gap-3 group ${
+                      u.overdue ? 'bg-red-50/40 hover:bg-red-50' : 'hover:bg-gray-50'
+                    }`}
+                  >
                     <div className="w-14 shrink-0">
-                      <div className="text-xs font-semibold text-gray-700 leading-tight">{abs}</div>
-                      <div className="text-[10px] text-gray-400">{rel}</div>
+                      <div className={`text-xs font-semibold leading-tight ${u.overdue ? 'text-red-600' : 'text-gray-700'}`}>
+                        {abs}
+                      </div>
+                      <div className={`text-[10px] ${u.overdue ? 'text-red-500 font-medium' : 'text-gray-400'}`}>
+                        {u.overdue ? 'Overdue' : rel}
+                      </div>
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="text-sm text-gray-700 truncate">{u.label}</div>
@@ -771,11 +799,25 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
                       </div>
                     )}
                     <div className="flex items-center gap-1 shrink-0">
-                      {(u.source === 'recurring' || u.source === 'income') && (
+                      {isManual && (() => {
+                        const manualId = manualByLabel.get(u.label)
+                        const manualEntry = manualId ? manualRecurring.find((m) => m.id === manualId) : null
+                        if (!manualEntry) return null
+                        return (
+                          <button
+                            onClick={() => { setShowManagedRecurring(true); startEditManual(manualEntry) }}
+                            title="Edit this recurring payment (label, amount, date, cadence)"
+                            className={`text-xs text-gray-300 hover:text-green-700 transition-all px-1 ${actionVisibility}`}
+                          >
+                            ✎
+                          </button>
+                        )
+                      })()}
+                      {canConvertEdit && (
                         <button
                           onClick={() => handleEditAutoDetected(u)}
                           title="Convert to manual so you can edit label, amount, cadence, category"
-                          className="text-xs text-gray-300 hover:text-green-700 opacity-0 group-hover:opacity-100 transition-all px-1"
+                          className={`text-xs text-gray-300 hover:text-green-700 transition-all px-1 ${actionVisibility}`}
                         >
                           ✎
                         </button>
@@ -783,7 +825,7 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
                       <button
                         onClick={() => handleRemoveUpcoming(u)}
                         title={removeTitle}
-                        className="text-xs text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all px-1"
+                        className={`text-xs text-gray-300 hover:text-red-500 transition-all px-1 ${actionVisibility}`}
                       >
                         ✕
                       </button>
