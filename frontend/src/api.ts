@@ -101,7 +101,13 @@ interface PywebviewApi {
   get_budget_guide: () => Promise<BudgetGuideData>
   get_orphaned_account_ids: () => Promise<{ account_id: string; tx_count: number }[]>
   delete_transactions_for_account: (account_id: string) => Promise<{ ok: boolean; deleted: number }>
-  chat_advisor: (messages: { role: string; content: string }[]) => Promise<{ content?: string; error?: string; usage?: { input_tokens: number; output_tokens: number } }>
+  chat_advisor: (messages: { role: string; content: string }[], conversation_id?: string) => Promise<{ content?: string; error?: string; conversation_id?: string; usage?: { input_tokens: number; output_tokens: number } }>
+  get_active_advisor_conversation: () => Promise<{ conversation_id: string; messages: { id: number; role: 'user' | 'assistant'; content: string; created_at: string; input_tokens: number | null; output_tokens: number | null }[] }>
+  list_advisor_conversations: (include_archived?: string) => Promise<{ id: string; title: string | null; created_at: string; updated_at: string; archived: number; message_count: number; first_user_message: string | null }[]>
+  get_advisor_conversation: (conversation_id: string) => Promise<{ conversation_id: string; messages: { id: number; role: 'user' | 'assistant'; content: string; created_at: string; input_tokens: number | null; output_tokens: number | null }[] }>
+  new_advisor_conversation: () => Promise<{ conversation_id: string }>
+  archive_advisor_conversation: (conversation_id: string) => Promise<{ ok: boolean; error?: string }>
+  delete_advisor_conversation: (conversation_id: string) => Promise<{ ok: boolean; error?: string }>
   get_calendar_data: (year_month: string) => Promise<CalendarData>
   generate_rules_from_transactions: (month?: string) => Promise<GenerateRulesResult>
   apply_rule_suggestions: (new_categories: CategorySuggestion[], rules: RuleSuggestion[]) => Promise<{ ok: boolean; created_categories: number; created_rules: number; error?: string }>
@@ -251,8 +257,15 @@ export const undoActivity = (activityId: number) => api().undo_activity(activity
 export const getBudgetGuide = () => api().get_budget_guide()
 export const getOrphanedAccountIds = () => api().get_orphaned_account_ids()
 export const deleteTransactionsForAccount = (accountId: string) => api().delete_transactions_for_account(accountId)
-export const chatAdvisor = (messages: { role: string; content: string }[]) =>
-  api().chat_advisor(messages) as Promise<{ content?: string; error?: string; usage?: { input_tokens: number; output_tokens: number } }>
+export const chatAdvisor = (messages: { role: string; content: string }[], conversationId?: string) =>
+  api().chat_advisor(messages, conversationId)
+export const getActiveAdvisorConversation = () => api().get_active_advisor_conversation()
+export const listAdvisorConversations = (includeArchived = false) =>
+  api().list_advisor_conversations(includeArchived ? '1' : '0')
+export const getAdvisorConversation = (conversationId: string) => api().get_advisor_conversation(conversationId)
+export const newAdvisorConversation = () => api().new_advisor_conversation()
+export const archiveAdvisorConversation = (conversationId: string) => api().archive_advisor_conversation(conversationId)
+export const deleteAdvisorConversation = (conversationId: string) => api().delete_advisor_conversation(conversationId)
 export const getCalendarData = (yearMonth: string) => api().get_calendar_data(yearMonth)
 export const generateRulesFromTransactions = (month = '') => api().generate_rules_from_transactions(month)
 export const applyRuleSuggestions = (newCategories: CategorySuggestion[], rules: RuleSuggestion[]) => api().apply_rule_suggestions(newCategories, rules)

@@ -1129,6 +1129,94 @@ class Repository:
         ).fetchall()
         return [{k: r[k] for k in r.keys()} for r in rows]
 
+    # ------------------------------------------------------------------
+    # AI Advisor chat persistence
+    # ------------------------------------------------------------------
+
+    def get_or_create_active_conversation(self) -> str:
+        """Return the id of the most-recent non-archived conversation, creating
+        one if none exists. Called at chat load and before saving messages so
+        the caller never has to think about the conversation lifecycle."""
+        row = self.conn.execute(
+            "SELECT id FROM advisor_conversations WHERE archived = 0 "
+            "ORDER BY updated_at DESC LIMIT 1"
+        ).fetchone()
+        if row:
+            return row["id"]
+        return self.create_advisor_conversation()
+
+    def create_advisor_conversation(self, title: str | None = None) -> str:
+        import uuid
+        from datetime import datetime
+        cid = uuid.uuid4().hex[:12]
+        now = datetime.now().isoformat()
+        self.conn.execute(
+            "INSERT INTO advisor_conversations (id, title, created_at, updated_at, archived) "
+            "VALUES (?, ?, ?, ?, 0)",
+            (cid, title, now, now),
+        )
+        self.conn.commit()
+        return cid
+
+    def list_advisor_conversations(self, include_archived: bool = False) -> list[dict]:
+        sql = ("SELECT c.id, c.title, c.created_at, c.updated_at, c.archived, "
+               "  (SELECT COUNT(*) FROM advisor_messages m WHERE m.conversation_id = c.id) AS message_count, "
+               "  (SELECT m.content FROM advisor_messages m WHERE m.conversation_id = c.id AND m.role = 'user' "
+               "     ORDER BY m.id ASC LIMIT 1) AS first_user_message "
+               "FROM advisor_conversations c ")
+        if not include_archived:
+            sql += "WHERE c.archived = 0 "
+        sql += "ORDER BY c.updated_at DESC"
+        rows = self.conn.execute(sql).fetchall()
+        return [{k: r[k] for k in r.keys()} for r in rows]
+
+    def get_advisor_messages(self, conversation_id: str) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT id, role, content, input_tokens, output_tokens, created_at "
+            "FROM advisor_messages WHERE conversation_id = ? ORDER BY id ASC",
+            (conversation_id,),
+        ).fetchall()
+        return [{k: r[k] for k in r.keys()} for r in rows]
+
+    def add_advisor_message(
+        self, conversation_id: str, role: str, content: str,
+        input_tokens: int | None = None, output_tokens: int | None = None,
+    ) -> int:
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        cur = self.conn.execute(
+            "INSERT INTO advisor_messages "
+            "(conversation_id, role, content, input_tokens, output_tokens, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (conversation_id, role, content, input_tokens, output_tokens, now),
+        )
+        # Bump conversation updated_at + backfill title from the first user message
+        self.conn.execute(
+            "UPDATE advisor_conversations SET updated_at = ?, "
+            "title = COALESCE(title, CASE WHEN ? = 'user' THEN substr(?, 1, 60) ELSE title END) "
+            "WHERE id = ?",
+            (now, role, content, conversation_id),
+        )
+        self.conn.commit()
+        return cur.lastrowid or 0
+
+    def archive_advisor_conversation(self, conversation_id: str) -> None:
+        """Archive (soft-delete) a conversation — hides from the active picker
+        but preserves the messages so they can be re-opened later."""
+        self.conn.execute(
+            "UPDATE advisor_conversations SET archived = 1 WHERE id = ?",
+            (conversation_id,),
+        )
+        self.conn.commit()
+
+    def delete_advisor_conversation(self, conversation_id: str) -> None:
+        """Hard delete — messages are removed by ON DELETE CASCADE."""
+        self.conn.execute(
+            "DELETE FROM advisor_conversations WHERE id = ?",
+            (conversation_id,),
+        )
+        self.conn.commit()
+
     def _paid_ahead_set(self) -> set[tuple[str, str]]:
         """Return the (normalized_label, scheduled_date) pairs already marked paid."""
         rows = self.conn.execute(

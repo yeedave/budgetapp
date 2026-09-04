@@ -1392,8 +1392,14 @@ class Api:
     # AI Financial Advisor
     # ------------------------------------------------------------------
 
-    def chat_advisor(self, messages: list) -> dict:
-        """Send a chat message to Claude with full financial context in the system prompt."""
+    def chat_advisor(self, messages: list, conversation_id: str = "") -> dict:
+        """Send a chat message to Claude with full financial context in the system prompt.
+
+        `messages` is the full running transcript from the frontend (what the model
+        will condition on this turn — same shape Anthropic expects). If a
+        `conversation_id` is passed, the latest user message and the assistant
+        reply are appended to that conversation in SQLite so history survives
+        restarts. If it's empty, we allocate/reuse the active conversation."""
         import os
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
@@ -1402,6 +1408,9 @@ class Api:
         try:
             import anthropic
             from decimal import Decimal
+
+            # Ensure we always have a conversation to persist against.
+            cid = conversation_id or self._repo.get_or_create_active_conversation()
 
             # ── Gather financial data ────────────────────────────────
             snapshot = self.get_budget_snapshot("3")
@@ -1412,13 +1421,55 @@ class Api:
             net_worth = self._repo.get_net_worth()
 
             # ── Build system prompt ──────────────────────────────────
+            # Persona + operating framework — same tone a seasoned CFP would take
+            # with a middle-income household client: assess, prioritize, prescribe.
             lines: list[str] = [
-                "You are a personal financial advisor integrated into the user's budget app.",
-                "You have access to their real financial data below. Be specific, reference actual",
-                "numbers, name categories and debts by their real names, and give actionable advice.",
-                "Be direct and honest — if they are overspending somewhere, say so clearly.",
-                "When asked about categories or rules, explain which transaction descriptions",
-                "trigger each rule. Keep responses concise but complete.",
+                "You are Jade, an AI financial advisor embedded in the user's personal budget app.",
+                "Adopt the mindset and communication style of a Certified Financial Planner (CFP)",
+                "with 10+ years of experience advising middle-income households on cash flow,",
+                "debt payoff, emergency reserves, retirement, and tax-advantaged saving.",
+                "",
+                "## How you work",
+                "1. Ground every answer in the user's real data below — reference actual dollar",
+                "   amounts, real category and debt names, and identifiable trends.",
+                "2. When they ask an open-ended question, structure the reply as:",
+                "   **Assessment** (what the data says) → **Priorities** (what matters most and",
+                "   why) → **Actions** (specific, dollar-quantified next steps).",
+                "3. If the data is thin or ambiguous, ask ONE targeted clarifying question",
+                "   before recommending — don't guess at goals, timelines, or risk tolerance.",
+                "4. Be direct and honest. If they're overspending, running a deficit, or",
+                "   carrying high-APR debt while building savings, say so plainly and explain",
+                "   the math (e.g. 'paying down a 24% APR card beats a 4% savings account by",
+                "   20 points of guaranteed return').",
+                "5. Prefer specifics over generalities. 'Cut $85/month from restaurants' beats",
+                "   'reduce dining spending'.",
+                "6. Keep responses tight — 3–8 short bullets or a compact paragraph is usually",
+                "   ideal. Expand only when the user asks for depth.",
+                "",
+                "## Frameworks you can lean on when relevant",
+                "- **Emergency fund**: 3–6 months of essential expenses in a HYSA before",
+                "  aggressive investing. Larger reserves for variable-income or single-earner",
+                "  households.",
+                "- **Debt avalanche vs snowball**: avalanche (highest APR first) minimizes",
+                "  interest; snowball (smallest balance first) helps motivation. Recommend",
+                "  avalanche as default unless behavior/motivation is the bottleneck.",
+                "- **50/30/20**: baseline needs/wants/savings & debt split — useful as a",
+                "  reference point, not a rigid rule.",
+                "- **Tax-advantaged priority order (US)**: (1) 401k match, (2) HSA if eligible,",
+                "  (3) high-interest debt payoff, (4) Roth IRA to limit, (5) rest of 401k,",
+                "  (6) taxable brokerage. Adjust for the user's situation.",
+                "- **Subscription audit**: recurring low-dollar bleed adds up — flag things",
+                "  they haven't used or that duplicate each other.",
+                "",
+                "## Honest boundaries",
+                "You are not a licensed fiduciary and don't know the user's full tax, estate,",
+                "or insurance picture. For major decisions (buying a home, large investment",
+                "moves, tax-heavy transactions), recommend they consult a licensed CFP or CPA.",
+                "Never fabricate numbers. If a data point isn't in what's provided, say so.",
+                "",
+                "## Answering questions about the app itself",
+                "When asked about categories, rules, or how the app classifies things, explain",
+                "which transaction descriptions trigger each rule and how the user can adjust.",
                 "",
                 "## Monthly Averages (last 3 months)",
                 f"Income:              ${snapshot.get('monthly_income', 0):,.2f}",
@@ -1495,6 +1546,13 @@ class Api:
                 if skills_text:
                     system_prompt += f"\n\n---\n\n## Custom Advisor Instructions\n\n{skills_text}"
 
+            # ── Persist the incoming user message before calling out ─
+            # Guarded: only persist the LAST message and only if it's the user's
+            # (the frontend sends the full transcript each turn — earlier
+            # messages are already stored).
+            if messages and isinstance(messages[-1], dict) and messages[-1].get("role") == "user":
+                self._repo.add_advisor_message(cid, "user", str(messages[-1].get("content", "")))
+
             # ── Call Claude ──────────────────────────────────────────
             model = self.get_settings().get("anthropic_model") or "claude-opus-4-7"
             client = anthropic.Anthropic(api_key=api_key)
@@ -1505,16 +1563,67 @@ class Api:
                          "cache_control": {"type": "ephemeral"}}],
                 messages=messages,
             )
+            reply_text = response.content[0].text
+            in_tok = response.usage.input_tokens
+            out_tok = response.usage.output_tokens
+
+            # ── Persist the assistant reply ──────────────────────────
+            self._repo.add_advisor_message(cid, "assistant", reply_text, in_tok, out_tok)
+
             return {
-                "content": response.content[0].text,
+                "content": reply_text,
+                "conversation_id": cid,
                 "usage": {
-                    "input_tokens": response.usage.input_tokens,
-                    "output_tokens": response.usage.output_tokens,
+                    "input_tokens": in_tok,
+                    "output_tokens": out_tok,
                 },
             }
 
         except Exception as exc:
             return {"error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Advisor conversation history
+    # ------------------------------------------------------------------
+
+    def get_active_advisor_conversation(self) -> dict:
+        """Return the id and full message history of the most-recent
+        non-archived conversation, creating one if none exists yet.
+        Called on advisor page load so the user sees prior context."""
+        cid = self._repo.get_or_create_active_conversation()
+        return {
+            "conversation_id": cid,
+            "messages": self._repo.get_advisor_messages(cid),
+        }
+
+    def list_advisor_conversations(self, include_archived: str = "0") -> list[dict]:
+        return self._repo.list_advisor_conversations(include_archived == "1")
+
+    def get_advisor_conversation(self, conversation_id: str) -> dict:
+        return {
+            "conversation_id": conversation_id,
+            "messages": self._repo.get_advisor_messages(conversation_id),
+        }
+
+    def new_advisor_conversation(self) -> dict:
+        """Start a fresh conversation without touching the old one — the
+        previous thread stays intact and can be re-opened from history."""
+        cid = self._repo.create_advisor_conversation()
+        return {"conversation_id": cid}
+
+    def archive_advisor_conversation(self, conversation_id: str) -> dict:
+        try:
+            self._repo.archive_advisor_conversation(conversation_id)
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def delete_advisor_conversation(self, conversation_id: str) -> dict:
+        try:
+            self._repo.delete_advisor_conversation(conversation_id)
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     # ------------------------------------------------------------------
     # Rule generation from transactions

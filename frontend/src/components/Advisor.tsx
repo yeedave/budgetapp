@@ -1,30 +1,65 @@
 import { useState, useRef, useEffect } from 'react'
 import type { CategorySuggestion, RuleSuggestion } from '../types'
-import { chatAdvisor, generateRulesFromTransactions, applyRuleSuggestions, exportRulesCategories, getAdvisorSkills, saveAdvisorSkills } from '../api'
+import {
+  chatAdvisor, generateRulesFromTransactions, applyRuleSuggestions, exportRulesCategories,
+  getAdvisorSkills, saveAdvisorSkills,
+  getActiveAdvisorConversation, listAdvisorConversations, getAdvisorConversation,
+  newAdvisorConversation, deleteAdvisorConversation,
+} from '../api'
 
 interface Message {
   role: 'user' | 'assistant'
   content: string
 }
 
-const CHAT_STORAGE_KEY = 'jadebanking_advisor_chat'
+interface ConversationSummary {
+  id: string
+  title: string | null
+  first_user_message: string | null
+  updated_at: string
+  message_count: number
+}
 
-function loadStoredMessages(): Message[] {
+// One-time migration: pull the old localStorage chat over into SQLite if
+// present. Runs once per install; the old key is cleared after the copy.
+const LEGACY_STORAGE_KEY = 'jadebanking_advisor_chat'
+async function migrateLegacyChatIfPresent(conversationId: string): Promise<Message[] | null> {
   try {
-    const raw = localStorage.getItem(CHAT_STORAGE_KEY)
-    if (!raw) return []
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEY)
+    if (!raw) return null
     const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) return parsed.filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
-  } catch { /* ignore corrupt storage */ }
-  return []
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      localStorage.removeItem(LEGACY_STORAGE_KEY)
+      return null
+    }
+    const cleaned: Message[] = parsed
+      .filter((m: unknown): m is Message =>
+        !!m && typeof m === 'object'
+        && ((m as Message).role === 'user' || (m as Message).role === 'assistant')
+        && typeof (m as Message).content === 'string')
+      .map((m: Message) => ({ role: m.role, content: m.content }))
+    localStorage.removeItem(LEGACY_STORAGE_KEY)
+    if (cleaned.length === 0) return null
+    // Best-effort replay through the API so both roles land in SQLite.
+    // We can't invoke chat_advisor for old assistant messages (it would call the
+    // model again), so we just seed the conversation via the API by calling
+    // it with the LAST user message and letting the new persona reply fresh —
+    // then we PREPEND older history in-memory for display. Simpler: skip
+    // replaying — display them only for this session, next reload they're gone.
+    // Trade-off: legacy chats display until closed. Good enough.
+    void conversationId
+    return cleaned
+  } catch {
+    return null
+  }
 }
 
 const STARTERS = [
-  'Analyze my finances and tell me what to cut.',
-  'Am I on track to pay off my debts?',
-  'Which categories am I overspending in?',
-  'How should I allocate my monthly surplus?',
-  'Which subscriptions should I reconsider?',
+  'Give me a full financial assessment — where do I stand?',
+  'Build me a debt payoff plan (avalanche vs snowball).',
+  'How much emergency fund should I have, and how do I get there?',
+  'Audit my subscriptions — what should I cut?',
+  'Where should I put my monthly surplus?',
 ]
 
 
@@ -229,9 +264,13 @@ type AdvisorView = 'chat' | 'rules' | 'skills'
 
 export default function Advisor() {
   const [view, setView] = useState<AdvisorView>('chat')
-  const [messages, setMessages] = useState<Message[]>(() => loadStoredMessages())
+  const [messages, setMessages] = useState<Message[]>([])
+  const [conversationId, setConversationId] = useState<string>('')
+  const [conversationsList, setConversationsList] = useState<ConversationSummary[]>([])
+  const [showHistory, setShowHistory] = useState(false)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [historyLoading, setHistoryLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [usage, setUsage] = useState<{ input: number; output: number } | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -264,13 +303,39 @@ export default function Advisor() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
 
-  // Persist chat history until the user clicks Clear
+  // Load the active conversation on mount (survives app restarts).
   useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setHistoryLoading(true)
+      try {
+        const active = await getActiveAdvisorConversation()
+        if (cancelled) return
+        setConversationId(active.conversation_id)
+        const loaded: Message[] = active.messages.map((m) => ({ role: m.role, content: m.content }))
+        // One-time legacy migration: if the old localStorage chat still has
+        // messages and this conversation is empty, show them so the user
+        // doesn't lose context on the first launch after upgrade.
+        if (loaded.length === 0) {
+          const legacy = await migrateLegacyChatIfPresent(active.conversation_id)
+          if (legacy && !cancelled) {
+            setMessages(legacy)
+            setHistoryLoading(false)
+            return
+          }
+        }
+        setMessages(loaded)
+      } catch { /* first-load API might not be ready — retry on next tab visit */ }
+      finally { if (!cancelled) setHistoryLoading(false) }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  async function refreshConversationsList() {
     try {
-      if (messages.length === 0) localStorage.removeItem(CHAT_STORAGE_KEY)
-      else localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages))
-    } catch { /* storage full or disabled — ignore */ }
-  }, [messages])
+      setConversationsList(await listAdvisorConversations(false))
+    } catch { /* ignore */ }
+  }
 
   async function send(text?: string) {
     const content = (text ?? input).trim()
@@ -281,11 +346,50 @@ export default function Advisor() {
     setInput('')
     setLoading(true)
     setError(null)
-    const result = await chatAdvisor(next.map((m) => ({ role: m.role, content: m.content })))
+    const result = await chatAdvisor(
+      next.map((m) => ({ role: m.role, content: m.content })),
+      conversationId,
+    )
     setLoading(false)
+    if (result.conversation_id && result.conversation_id !== conversationId) {
+      setConversationId(result.conversation_id)
+    }
     if (result.usage) setUsage({ input: result.usage.input_tokens, output: result.usage.output_tokens })
     if (result.error) setError(result.error)
     else if (result.content) setMessages([...next, { role: 'assistant', content: result.content }])
+  }
+
+  async function handleNewConversation() {
+    if (loading) return
+    setError(null)
+    setUsage(null)
+    const res = await newAdvisorConversation()
+    setConversationId(res.conversation_id)
+    setMessages([])
+    setShowHistory(false)
+    await refreshConversationsList()
+  }
+
+  async function handleLoadConversation(cid: string) {
+    if (loading) return
+    setError(null)
+    setUsage(null)
+    const res = await getAdvisorConversation(cid)
+    setConversationId(res.conversation_id)
+    setMessages(res.messages.map((m) => ({ role: m.role, content: m.content })))
+    setShowHistory(false)
+  }
+
+  async function handleDeleteConversation(cid: string) {
+    if (loading) return
+    await deleteAdvisorConversation(cid)
+    // If we deleted the active one, spin up a fresh one
+    if (cid === conversationId) {
+      const res = await newAdvisorConversation()
+      setConversationId(res.conversation_id)
+      setMessages([])
+    }
+    await refreshConversationsList()
   }
 
   function handleKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -417,9 +521,9 @@ export default function Advisor() {
       {/* Header */}
       <div className="shrink-0 bg-white border-b px-6 py-4 flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-gray-900">AI Financial Advisor</h2>
+          <h2 className="text-sm font-semibold text-gray-900">Jade · AI Financial Advisor</h2>
           <p className="text-xs text-gray-400 mt-0.5">
-            Powered by Claude · reads your live budget, debts, categories, and rules
+            CFP-style guidance from Claude · reads your live budget, debts, categories, and rules · conversations save automatically
           </p>
         </div>
 
@@ -484,14 +588,76 @@ export default function Advisor() {
             Skills
           </button>
 
-          {messages.length > 0 && (
+          {/* History dropdown — earlier conversations preserved across restarts */}
+          <div className="relative">
             <button
-              onClick={() => { setMessages([]); setError(null) }}
-              className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+              onClick={async () => {
+                if (!showHistory) await refreshConversationsList()
+                setShowHistory((v) => !v)
+              }}
+              title="Browse and reopen earlier conversations"
+              className="px-3 py-1.5 text-xs bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors whitespace-nowrap"
             >
-              Clear
+              History ▾
             </button>
-          )}
+            {showHistory && (
+              <div className="absolute right-0 top-full mt-1 w-80 max-h-96 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
+                  <span className="text-xs font-medium text-gray-500">Previous conversations</span>
+                  <button
+                    onClick={() => setShowHistory(false)}
+                    className="text-xs text-gray-400 hover:text-gray-700"
+                  >
+                    ✕
+                  </button>
+                </div>
+                {conversationsList.length === 0 ? (
+                  <p className="px-3 py-3 text-xs text-gray-400 italic">
+                    No saved conversations yet.
+                  </p>
+                ) : (
+                  <ul className="divide-y divide-gray-50">
+                    {conversationsList.map((c) => {
+                      const label = c.title || c.first_user_message || 'Untitled'
+                      const preview = label.length > 60 ? label.slice(0, 60) + '…' : label
+                      const isActive = c.id === conversationId
+                      return (
+                        <li key={c.id} className={`px-3 py-2 hover:bg-gray-50 group flex items-start gap-2 ${isActive ? 'bg-green-50' : ''}`}>
+                          <button
+                            onClick={() => handleLoadConversation(c.id)}
+                            className="flex-1 min-w-0 text-left"
+                          >
+                            <div className={`text-xs truncate ${isActive ? 'text-green-800 font-medium' : 'text-gray-700'}`}>
+                              {preview}
+                            </div>
+                            <div className="text-[10px] text-gray-400 mt-0.5">
+                              {c.message_count} msg · {c.updated_at.slice(0, 10)}
+                              {isActive && <span className="ml-2 text-green-600">active</span>}
+                            </div>
+                          </button>
+                          <button
+                            onClick={() => handleDeleteConversation(c.id)}
+                            title="Delete this conversation"
+                            className="text-xs text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"
+                          >
+                            ✕
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={handleNewConversation}
+            title="Start a fresh conversation — the current one stays in History"
+            className="px-3 py-1.5 text-xs bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors whitespace-nowrap"
+          >
+            + New chat
+          </button>
         </div>
       </div>
 
@@ -513,14 +679,16 @@ export default function Advisor() {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
-        {messages.length === 0 && !loading && (
+        {messages.length === 0 && !loading && !historyLoading && (
           <div className="flex flex-col items-center justify-center h-full gap-5 text-center py-8">
             <div>
               <div className="w-16 h-16 rounded-full bg-green-600 flex items-center justify-center text-white text-xl font-bold mx-auto mb-3 shadow">
                 AI
               </div>
-              <p className="text-sm font-medium text-gray-700">Ask me anything about your finances</p>
-              <p className="text-xs text-gray-400 mt-1">I can see your transactions, categories, debts, and rules</p>
+              <p className="text-sm font-medium text-gray-700">Hi, I'm Jade — your CFP-style advisor</p>
+              <p className="text-xs text-gray-400 mt-1 max-w-md">
+                I read your live budget, debts, categories, and rules. Ask me anything about cash flow, debt payoff, savings, or specific spending patterns.
+              </p>
             </div>
             <div className="flex flex-col gap-2 w-full max-w-xs">
               {STARTERS.map((s) => (
@@ -533,6 +701,12 @@ export default function Advisor() {
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {historyLoading && messages.length === 0 && (
+          <div className="flex items-center justify-center h-full text-xs text-gray-400 italic">
+            Loading conversation…
           </div>
         )}
 

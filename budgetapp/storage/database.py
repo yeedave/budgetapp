@@ -167,6 +167,30 @@ CREATE TABLE IF NOT EXISTS recurring_paid_occurrences (
     marked_at        TEXT NOT NULL,
     PRIMARY KEY (normalized_label, scheduled_date)
 );
+
+-- Persistent AI Advisor chat history. Storing in SQLite instead of the
+-- webview's localStorage means conversations survive app restarts, reinstalls,
+-- and OS-level cache wipes — user data lives with the rest of their data.
+CREATE TABLE IF NOT EXISTS advisor_conversations (
+    id         TEXT PRIMARY KEY,
+    title      TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    archived   INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS advisor_messages (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT NOT NULL REFERENCES advisor_conversations(id) ON DELETE CASCADE,
+    role            TEXT NOT NULL,  -- 'user' | 'assistant'
+    content         TEXT NOT NULL,
+    input_tokens    INTEGER,
+    output_tokens   INTEGER,
+    created_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_advisor_messages_conv
+    ON advisor_messages(conversation_id, id);
 """
 
 _MIGRATIONS = """
