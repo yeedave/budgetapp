@@ -263,8 +263,16 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
       await excludeRecurring(item.label)
       const fresh = await getRecurringExcluded()
       setExcluded(fresh)
-    } else if (item.source === 'manual' && item.id) {
-      await deleteManualRecurring(item.id)
+    } else if (item.source === 'manual') {
+      // Delete every manual recurring row matching this label — earlier
+      // versions of the ✎ workflow could create duplicates, so a single
+      // ✕ click needs to sweep all of them or the entry keeps projecting.
+      const matches = manualRecurring.filter((m) => m.label === item.label)
+      if (matches.length === 0 && item.id) {
+        await deleteManualRecurring(item.id)
+      } else {
+        for (const m of matches) await deleteManualRecurring(m.id)
+      }
     } else if (item.source === 'debt' && item.id) {
       await saveDebtDueDay(item.id, null)
     } else {
@@ -275,23 +283,29 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
   }
 
   /** Convert an auto-detected recurring item into an editable manual entry.
-   * Adds the manual_recurring row seeded from the detected data, excludes the
-   * auto-detected pattern so it doesn't project twice, then opens the inline
-   * edit form so the user can adjust anything. */
+   * If a manual entry with the same label already exists (e.g. from a previous
+   * ✎ click), reuse it instead of creating a duplicate. Excludes the
+   * auto-detected pattern so it doesn't project twice, then opens the edit
+   * modal so the user can adjust label, amount, cadence, etc. */
   async function handleEditAutoDetected(item: UpcomingScheduledItem) {
     const amt = item.amount != null ? Math.abs(parseFloat(String(item.amount))) : 0
     const isIncome = item.source === 'income'
     const day = parseInt(item.date.slice(8, 10)) || 1
     // 1. Exclude the auto-detected pattern
     await excludeRecurring(item.label)
-    // 2. Create a manual entry with the detected data as defaults
-    const res = await addManualRecurring(
-      item.label,
-      amt ? String(amt) : '',
-      day, 1,
-      item.date, '',
-      'monthly',
-    )
+    // 2. Reuse an existing manual entry with the same label, or create one
+    const existing = manualRecurring.find((m) => m.label === item.label)
+    let targetId: string | null = existing?.id ?? null
+    if (!existing) {
+      const res = await addManualRecurring(
+        item.label,
+        amt ? String(amt) : '',
+        day, 1,
+        item.date, '',
+        'monthly',
+      )
+      if (res.ok && res.id) targetId = res.id
+    }
     // 3. Refresh
     const [freshExcluded, freshManual] = await Promise.all([
       getRecurringExcluded(), getManualRecurring(),
@@ -299,15 +313,14 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
     setExcluded(freshExcluded)
     setManualRecurring(freshManual)
     await loadCalendar()
-    // 4. Open the edit form on the newly-created manual entry as a modal so
-    //    the user sees it immediately instead of having to hunt for the panel.
-    if (res.ok && res.id) {
-      const newlyAdded = freshManual.find((m) => m.id === res.id)
-      if (newlyAdded) {
-        // Correct sign: manual recurring stores sign in the amount. When
-        // auto-detected income becomes manual, we want is_income = true.
+    // 4. Open the edit modal on the resolved manual entry
+    if (targetId) {
+      const target = freshManual.find((m) => m.id === targetId)
+      if (target) {
+        // Sign correction: when auto-detected income becomes manual, force
+        // is_income = true even if the stored amount got flipped.
         setEditAsModal(true)
-        startEditManual({ ...newlyAdded, amount: (isIncome ? amt : -amt).toString() })
+        startEditManual({ ...target, amount: (isIncome ? amt : -amt).toString() })
       }
     }
   }
