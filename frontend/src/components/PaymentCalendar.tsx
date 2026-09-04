@@ -907,7 +907,7 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
                           <button
                             onClick={() => { setEditAsModal(true); startEditManual(manualEntry) }}
                             title="Edit this recurring payment (label, amount, date, cadence)"
-                            className={`text-xs text-gray-300 hover:text-green-700 transition-all px-1 ${actionVisibility}`}
+                            className={`text-sm text-gray-500 hover:text-green-700 transition-all px-1 ${actionVisibility}`}
                           >
                             ✎
                           </button>
@@ -917,24 +917,24 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
                         <button
                           onClick={() => handleEditAutoDetected(u)}
                           title="Convert to manual so you can edit label, amount, cadence, category"
-                          className={`text-xs text-gray-300 hover:text-green-700 transition-all px-1 ${actionVisibility}`}
+                          className={`text-sm text-gray-500 hover:text-green-700 transition-all px-1 ${actionVisibility}`}
                         >
                           ✎
                         </button>
                       )}
-                      {u.source !== 'income' && (
-                        <button
-                          onClick={() => handleMarkPaid(u)}
-                          title="Mark as paid — I paid this ahead of time"
-                          className={`text-xs text-gray-300 hover:text-green-700 transition-all px-1 ${actionVisibility}`}
-                        >
-                          ✓
-                        </button>
-                      )}
+                      <button
+                        onClick={() => handleMarkPaid(u)}
+                        title={u.source === 'income'
+                          ? 'Mark as received — I got this early / dismiss this cycle'
+                          : 'Mark as paid — I paid this ahead of time'}
+                        className={`text-sm text-gray-500 hover:text-green-700 transition-all px-1 ${actionVisibility}`}
+                      >
+                        ✓
+                      </button>
                       <button
                         onClick={() => handleRemoveUpcoming(u)}
                         title={removeTitle}
-                        className={`text-xs text-gray-300 hover:text-red-500 transition-all px-1 ${actionVisibility}`}
+                        className={`text-sm text-gray-500 hover:text-red-500 transition-all px-1 ${actionVisibility}`}
                       >
                         ✕
                       </button>
