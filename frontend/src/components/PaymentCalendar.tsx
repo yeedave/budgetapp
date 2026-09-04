@@ -865,11 +865,13 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
                   : 'Stop auto-detecting this as recurring'
                 const isManual = u.source === 'manual'
                 const canConvertEdit = u.source === 'recurring' || u.source === 'income'
-                // Overdue items always show the action buttons (no hover needed) so
-                // it's clear they need attention.
+                // Action buttons stay softly visible at rest and darken on hover.
+                // Fully-hidden buttons made users think the actions disappeared
+                // after closing the edit modal (cursor was on the modal, not the
+                // row, so no hover state → invisible buttons).
                 const actionVisibility = u.overdue
-                  ? 'opacity-70 hover:opacity-100'
-                  : 'opacity-0 group-hover:opacity-100'
+                  ? 'opacity-80 hover:opacity-100'
+                  : 'opacity-40 hover:opacity-100'
                 return (
                   <li
                     key={`${u.date}-${u.label}-${idx}`}
