@@ -4,10 +4,11 @@ import {
   getCalendarData, excludeRecurring, unexcludeRecurring, getRecurringExcluded,
   getManualRecurring, addManualRecurring, updateManualRecurring, deleteManualRecurring,
   detectRecurring, saveDebtDueDay,
-  markRecurringPaid,
+  markRecurringPaid, unmarkRecurringPaid, getRecurringPaid,
 } from '../api'
 
 type ExcludedItem = { normalized_description: string; sample_description: string; excluded_at: string }
+type PaidAheadItem = { normalized_label: string; scheduled_date: string; sample_label: string; marked_at: string }
 
 const INTERVAL_OPTIONS = [
   { value: 1, label: 'Monthly' },
@@ -55,6 +56,9 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
   const [excluded, setExcluded] = useState<ExcludedItem[]>([])
   const [showExcludedPanel, setShowExcludedPanel] = useState(false)
   const [busyLabel, setBusyLabel] = useState<string | null>(null)
+  const [paidAhead, setPaidAhead] = useState<PaidAheadItem[]>([])
+  const [showPaidPanel, setShowPaidPanel] = useState(false)
+  const [paidToast, setPaidToast] = useState<string | null>(null)
 
   const [manualRecurring, setManualRecurring] = useState<ManualRecurring[]>([])
   const [showAddForm, setShowAddForm] = useState(false)
@@ -108,6 +112,7 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
   useEffect(() => { loadCalendar() }, [yearMonth])
   useEffect(() => {
     getRecurringExcluded().then(setExcluded)
+    getRecurringPaid().then(setPaidAhead)
     refreshUpcomingAndManual()
   }, [])
 
@@ -233,6 +238,17 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
 
   async function handleMarkPaid(item: UpcomingScheduledItem) {
     await markRecurringPaid(item.label, item.date)
+    const [fresh] = await Promise.all([getRecurringPaid()])
+    setPaidAhead(fresh)
+    setPaidToast(`Marked "${item.label}" (${item.date}) as paid — click "Paid ahead" below to undo`)
+    setTimeout(() => setPaidToast(null), 5000)
+    await loadCalendar()
+    await refreshUpcomingAndManual()
+  }
+
+  async function handleUnmarkPaid(p: PaidAheadItem) {
+    await unmarkRecurringPaid(p.sample_label, p.scheduled_date)
+    setPaidAhead(await getRecurringPaid())
     await loadCalendar()
     await refreshUpcomingAndManual()
   }
@@ -455,12 +471,68 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
         </span>
         <span className="flex-1" />
         <button
+          onClick={() => setShowPaidPanel((v) => !v)}
+          className="text-xs text-gray-400 hover:text-green-700 transition-colors"
+        >
+          Paid ahead ({paidAhead.length}) {showPaidPanel ? '▲' : '▼'}
+        </button>
+        <button
           onClick={() => setShowExcludedPanel((v) => !v)}
           className="text-xs text-gray-400 hover:text-green-700 transition-colors"
         >
           Excluded recurring ({excluded.length}) {showExcludedPanel ? '▲' : '▼'}
         </button>
       </div>
+
+      {/* Toast confirmation after marking paid */}
+      {paidToast && (
+        <div className="mt-3 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-xs text-green-800 flex items-center justify-between">
+          <span>{paidToast}</span>
+          <button
+            onClick={() => setPaidToast(null)}
+            className="text-green-600 hover:text-green-800 ml-2"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Paid-ahead management */}
+      {showPaidPanel && (
+        <div className="mt-3 bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wide">
+            Payments you marked as already paid
+          </div>
+          <div className="px-4 py-2 text-xs text-gray-400 border-b border-gray-100 italic">
+            These hide a single scheduled occurrence from the calendar. No transaction is created — your actual paid transaction should be in the account's history from your import.
+          </div>
+          {paidAhead.length === 0 ? (
+            <p className="px-4 py-3 text-xs text-gray-400 italic">
+              Nothing marked paid ahead. Click the ✓ next to an upcoming payment to hide that specific occurrence.
+            </p>
+          ) : (
+            <ul className="divide-y divide-gray-50">
+              {paidAhead.map((p) => (
+                <li key={`${p.normalized_label}-${p.scheduled_date}`} className="flex items-center justify-between px-4 py-2 hover:bg-gray-50">
+                  <div className="min-w-0">
+                    <div className="text-sm text-gray-700 truncate">{p.sample_label}</div>
+                    <div className="text-xs text-gray-400">
+                      was due {p.scheduled_date} · marked {p.marked_at.slice(0, 10)}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleUnmarkPaid(p)}
+                    className="text-xs px-2 py-0.5 border border-gray-200 text-gray-500 rounded hover:border-green-400 hover:text-green-700 hover:bg-green-50 transition-colors shrink-0 ml-3"
+                    title="Restore this occurrence to the calendar"
+                  >
+                    Undo
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* Excluded patterns management */}
       {showExcludedPanel && (
