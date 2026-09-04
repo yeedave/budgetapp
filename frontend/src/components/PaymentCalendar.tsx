@@ -259,24 +259,23 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
   }
 
   async function handleRemoveUpcoming(item: UpcomingScheduledItem) {
-    if (item.source === 'recurring' || item.source === 'income') {
-      await excludeRecurring(item.label)
-      const fresh = await getRecurringExcluded()
-      setExcluded(fresh)
-    } else if (item.source === 'manual') {
-      // Delete every manual recurring row matching this label — earlier
-      // versions of the ✎ workflow could create duplicates, so a single
-      // ✕ click needs to sweep all of them or the entry keeps projecting.
-      const matches = manualRecurring.filter((m) => m.label === item.label)
-      if (matches.length === 0 && item.id) {
-        await deleteManualRecurring(item.id)
-      } else {
-        for (const m of matches) await deleteManualRecurring(m.id)
-      }
-    } else if (item.source === 'debt' && item.id) {
+    if (item.source === 'debt' && item.id) {
       await saveDebtDueDay(item.id, null)
     } else {
-      return
+      // For recurring / income / manual — sweep BOTH paths so a single ✕
+      // click cleans up:
+      //   - any manual_recurring rows with matching label (positive-amount
+      //     manuals project as source='income', so this catches them too)
+      //   - the auto-detected pattern via excludeRecurring
+      const manualMatches = manualRecurring.filter((m) => m.label === item.label)
+      for (const m of manualMatches) await deleteManualRecurring(m.id)
+      if (item.source !== 'manual') {
+        await excludeRecurring(item.label)
+        setExcluded(await getRecurringExcluded())
+      } else if (item.id && manualMatches.length === 0) {
+        // Fallback: id-only delete when label lookup missed
+        await deleteManualRecurring(item.id)
+      }
     }
     await loadCalendar()
     await refreshUpcomingAndManual()
