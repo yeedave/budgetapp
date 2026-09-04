@@ -229,10 +229,6 @@ There's also an **+ Add recurring payment** panel for setting up things the app 
 
 *"Can I afford $400/mo for a new car payment?"* — this tab tells you. It compares against your actual spending patterns from the last 3 months and shows the impact on your budget.
 
-### Progress
-
-A gamified view of debt payoff — you earn XP for every dollar of principal you pay down, level up as you go, and accumulate a "prize fund" from freed-up minimum payments when you pay off a debt.
-
 ### Splits
 
 For expenses someone else owes you part of. Say you paid $80 for a dinner with a friend who owes $40. Create a split on the transaction, enter their name and the amount they owe. The transaction gets divided into two — your $40 stays as regular spending, and their $40 becomes a "Owed by [name]" transaction that doesn't count against your budget. Mark it settled when they pay you back.

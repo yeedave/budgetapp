@@ -43,7 +43,10 @@ python -m budgetapp.parsers.chase_checking <file.pdf>   # test a parser
 7. ✅ Dashboard UI + Transactions tab + Debts tab (editable table + Avalanche/Snowball planner)
 8. ✅ Charts (Recharts) — Dashboard: spending distribution donut (by bucket); Debts tab: balance horizontal bar chart + payoff timeline line chart (Avalanche vs Snowball)
 9. Packaging + CI
-10. Progress tab (optional/toggleable) — gamified debt payoff tracker
+10. Progress tab (parked — code intact but hidden from menu) — gamified debt payoff tracker
+    - Currently disabled: removed from `MORE_VIEWS` in `frontend/src/App.tsx`. Component,
+      route handler, imports, and `VALID_VIEWS` entry all still exist; re-enable by adding
+      `'progress'` back to `MORE_VIEWS`.
     - Avatar selector: placeholder silhouette now; swap in real animated assets later (user will upload)
     - XP system: earned per dollar of principal paid + milestone burst on full payoff
     - Level thresholds + unlock screen at each level

@@ -32,7 +32,10 @@ function usePywebviewReady() {
 const VALID_VIEWS: View[] = ['dashboard', 'transactions', 'debts', 'categories', 'accounts', 'calculator', 'progress', 'splits', 'guide', 'advisor', 'calendar', 'settings']
 
 const PRIMARY_VIEWS: View[] = ['dashboard', 'transactions', 'debts', 'categories', 'accounts', 'calendar', 'advisor']
-const MORE_VIEWS: View[] = ['progress', 'calculator', 'splits', 'guide', 'settings']
+// Progress tab hidden from menu but retained in the codebase — flip back on
+// by adding 'progress' to this list. Rendering, imports, and route handler
+// below are intentionally left intact.
+const MORE_VIEWS: View[] = ['calculator', 'splits', 'guide', 'settings']
 const VIEW_LABEL: Record<View, string> = {
   dashboard: 'Dashboard', transactions: 'Transactions', debts: 'Debts',
   categories: 'Categories', accounts: 'Accounts', progress: 'Progress',
