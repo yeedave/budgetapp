@@ -4,6 +4,7 @@ import {
   getCalendarData, excludeRecurring, unexcludeRecurring, getRecurringExcluded,
   getManualRecurring, addManualRecurring, updateManualRecurring, deleteManualRecurring,
   detectRecurring, saveDebtDueDay,
+  markRecurringPaid,
 } from '../api'
 
 type ExcludedItem = { normalized_description: string; sample_description: string; excluded_at: string }
@@ -226,6 +227,12 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
     setEditSaving(false)
     if (!res.ok) { setEditError(res.error ?? 'Failed to save.'); return }
     setEditingRecurringId(null)
+    await loadCalendar()
+    await refreshUpcomingAndManual()
+  }
+
+  async function handleMarkPaid(item: UpcomingScheduledItem) {
+    await markRecurringPaid(item.label, item.date)
     await loadCalendar()
     await refreshUpcomingAndManual()
   }
@@ -820,6 +827,15 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
                           className={`text-xs text-gray-300 hover:text-green-700 transition-all px-1 ${actionVisibility}`}
                         >
                           ✎
+                        </button>
+                      )}
+                      {u.source !== 'income' && (
+                        <button
+                          onClick={() => handleMarkPaid(u)}
+                          title="Mark as paid — I paid this ahead of time"
+                          className={`text-xs text-gray-300 hover:text-green-700 transition-all px-1 ${actionVisibility}`}
+                        >
+                          ✓
                         </button>
                       )}
                       <button

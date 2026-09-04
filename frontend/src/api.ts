@@ -78,6 +78,9 @@ interface PywebviewApi {
   get_recurring_excluded: () => Promise<{ normalized_description: string; sample_description: string; excluded_at: string }[]>
   exclude_recurring: (description: string) => Promise<{ ok: boolean; normalized_description?: string; error?: string }>
   unexclude_recurring: (normalized_description: string) => Promise<{ ok: boolean; error?: string }>
+  mark_recurring_paid: (label: string, scheduled_date: string) => Promise<{ ok: boolean; error?: string }>
+  unmark_recurring_paid: (label: string, scheduled_date: string) => Promise<{ ok: boolean; error?: string }>
+  get_recurring_paid: () => Promise<{ normalized_label: string; scheduled_date: string; sample_label: string; marked_at: string }[]>
   get_manual_recurring: () => Promise<ManualRecurring[]>
   add_manual_recurring: (label: string, amount: string, day_of_month: string, interval_months: string, start_date: string, category_id: string, frequency?: string, second_day_of_month?: string) => Promise<{ ok: boolean; id?: string; error?: string }>
   update_manual_recurring: (recurring_id: string, label: string, amount: string, day_of_month: string, interval_months: string, start_date: string, category_id: string, frequency?: string, second_day_of_month?: string) => Promise<{ ok: boolean; error?: string }>
@@ -207,6 +210,9 @@ export const detectRecurring = () => api().detect_recurring()
 export const getRecurringExcluded = () => api().get_recurring_excluded()
 export const excludeRecurring = (description: string) => api().exclude_recurring(description)
 export const unexcludeRecurring = (normalizedDescription: string) => api().unexclude_recurring(normalizedDescription)
+export const markRecurringPaid = (label: string, scheduledDate: string) => api().mark_recurring_paid(label, scheduledDate)
+export const unmarkRecurringPaid = (label: string, scheduledDate: string) => api().unmark_recurring_paid(label, scheduledDate)
+export const getRecurringPaid = () => api().get_recurring_paid()
 export const getManualRecurring = () => api().get_manual_recurring()
 export const addManualRecurring = (
   label: string, amount: string, dayOfMonth: number, intervalMonths: number,

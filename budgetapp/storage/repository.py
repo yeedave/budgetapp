@@ -1095,6 +1095,48 @@ class Repository:
         self.conn.commit()
 
     # ------------------------------------------------------------------
+    # Paid-ahead scheduled occurrences
+    # ------------------------------------------------------------------
+
+    def mark_recurring_paid(self, label: str, scheduled_date: str) -> dict:
+        """Mark a single upcoming/overdue projection as already paid so it
+        drops off the calendar and Upcoming Payments list."""
+        from datetime import datetime
+        norm = self._normalize_desc(label)
+        if not norm or not scheduled_date:
+            return {"ok": False, "error": "label + date required"}
+        self.conn.execute(
+            "INSERT OR REPLACE INTO recurring_paid_occurrences "
+            "(normalized_label, scheduled_date, sample_label, marked_at) VALUES (?, ?, ?, ?)",
+            (norm, scheduled_date, label, datetime.now().isoformat()),
+        )
+        self.conn.commit()
+        return {"ok": True}
+
+    def unmark_recurring_paid(self, label: str, scheduled_date: str) -> None:
+        norm = self._normalize_desc(label)
+        self.conn.execute(
+            "DELETE FROM recurring_paid_occurrences "
+            "WHERE normalized_label = ? AND scheduled_date = ?",
+            (norm, scheduled_date),
+        )
+        self.conn.commit()
+
+    def get_recurring_paid(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT normalized_label, scheduled_date, sample_label, marked_at "
+            "FROM recurring_paid_occurrences ORDER BY scheduled_date DESC"
+        ).fetchall()
+        return [{k: r[k] for k in r.keys()} for r in rows]
+
+    def _paid_ahead_set(self) -> set[tuple[str, str]]:
+        """Return the (normalized_label, scheduled_date) pairs already marked paid."""
+        rows = self.conn.execute(
+            "SELECT normalized_label, scheduled_date FROM recurring_paid_occurrences"
+        ).fetchall()
+        return {(r["normalized_label"], r["scheduled_date"]) for r in rows}
+
+    # ------------------------------------------------------------------
     # Manual recurring payments (user-added)
     # ------------------------------------------------------------------
 
@@ -1247,11 +1289,13 @@ class Repository:
 
     def get_upcoming_scheduled(self, days_ahead: int = 60) -> list[dict]:
         """All scheduled items from today through N days ahead — debts, auto-detected
-        recurring projections, and manual recurring entries — merged and sorted."""
+        recurring projections, and manual recurring entries — merged and sorted.
+        Items the user has marked paid-ahead (via mark_recurring_paid) are omitted."""
         from datetime import date, timedelta
         today = date.today()
         end = today + timedelta(days=max(1, days_ahead))
 
+        paid_ahead = self._paid_ahead_set()
         results: list[dict] = []
 
         # Debt due dates
@@ -1266,6 +1310,8 @@ class Repository:
                 day = min(int(due_day), last_day)
                 occ = date(month_anchor.year, month_anchor.month, day)
                 if today <= occ <= end:
+                    if (self._normalize_desc(d["name"]), occ.isoformat()) in paid_ahead:
+                        continue
                     results.append({
                         "date": occ.isoformat(),
                         "label": d["name"],
@@ -1284,8 +1330,9 @@ class Repository:
             interval_days = max(1, int(r.get("avg_interval", 30)))
             proj = last + timedelta(days=interval_days)
             source = "recurring" if r.get("is_expense", True) else "income"
+            norm_label = self._normalize_desc(r["description"])
             while proj <= end:
-                if proj >= today:
+                if proj >= today and (norm_label, proj.isoformat()) not in paid_ahead:
                     results.append({
                         "date": proj.isoformat(),
                         "label": r["description"],
@@ -1302,7 +1349,10 @@ class Repository:
             except (ValueError, TypeError):
                 amt_val = 0
             src = "income" if amt_val > 0 else "manual"
+            norm_label = self._normalize_desc(rec["label"])
             for occ in self._project_manual_occurrences(rec, today, end):
+                if (norm_label, occ.isoformat()) in paid_ahead:
+                    continue
                 results.append({
                     "date": occ.isoformat(),
                     "label": rec["label"],

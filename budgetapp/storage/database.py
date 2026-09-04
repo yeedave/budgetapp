@@ -154,6 +154,19 @@ CREATE TABLE IF NOT EXISTS manual_recurring (
     frequency            TEXT NOT NULL DEFAULT 'monthly',
     second_day_of_month  INTEGER
 );
+
+-- User-marked "paid ahead" occurrences: a specific projected date the user has
+-- already paid outside the normal charge day. Prevents the calendar/upcoming
+-- list from showing that instance again. Keyed by normalized label + ISO date
+-- so it survives description tweaks and applies to auto-detected, manual, and
+-- debt-due projections alike.
+CREATE TABLE IF NOT EXISTS recurring_paid_occurrences (
+    normalized_label TEXT NOT NULL,
+    scheduled_date   TEXT NOT NULL,
+    sample_label     TEXT NOT NULL,
+    marked_at        TEXT NOT NULL,
+    PRIMARY KEY (normalized_label, scheduled_date)
+);
 """
 
 _MIGRATIONS = """

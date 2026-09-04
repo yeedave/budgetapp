@@ -1073,6 +1073,19 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def mark_recurring_paid(self, label: str, scheduled_date: str) -> dict:
+        return self._repo.mark_recurring_paid(label, scheduled_date)
+
+    def unmark_recurring_paid(self, label: str, scheduled_date: str) -> dict:
+        try:
+            self._repo.unmark_recurring_paid(label, scheduled_date)
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def get_recurring_paid(self) -> list[dict]:
+        return self._repo.get_recurring_paid()
+
     def get_manual_recurring(self) -> list[dict]:
         return self._repo.get_manual_recurring()
 
@@ -1262,6 +1275,11 @@ class Api:
 
         scheduled = []
 
+        # Occurrences the user has marked paid-ahead this cycle — filter them
+        # out of every projection type so the calendar reflects reality.
+        paid_ahead = self._repo._paid_ahead_set()
+        norm = self._repo._normalize_desc
+
         # Debt due dates
         debts = self._repo.get_debts()
         for d in debts:
@@ -1269,6 +1287,9 @@ class Api:
             if not due_day:
                 continue
             day = min(int(due_day), days_in_month)
+            occ_iso = date(year, month, day).isoformat()
+            if (norm(d["name"]), occ_iso) in paid_ahead:
+                continue
             scheduled.append({
                 "day": day,
                 "label": d["name"],
@@ -1298,8 +1319,9 @@ class Api:
             # Add all occurrences within this month — income gets its own
             # source so the UI can color paydays green and skip them in totals.
             rec_source = "recurring" if r.get("is_expense", True) else "income"
+            norm_label = norm(r["description"])
             while proj <= month_end:
-                if proj >= month_start:
+                if proj >= month_start and (norm_label, proj.isoformat()) not in paid_ahead:
                     scheduled.append({
                         "day": proj.day,
                         "label": r["description"],
@@ -1315,7 +1337,10 @@ class Api:
             except (ValueError, TypeError):
                 amt_val = 0
             src = "income" if amt_val > 0 else "manual"
+            norm_label = norm(rec["label"])
             for occ in self._repo._project_manual_occurrences(rec, month_start, month_end):
+                if (norm_label, occ.isoformat()) in paid_ahead:
+                    continue
                 scheduled.append({
                     "day": occ.day,
                     "label": rec["label"],
