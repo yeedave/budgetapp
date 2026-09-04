@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import type { Transaction, Category, Account } from '../types'
 import HelpTooltip from './HelpTooltip'
-import { createSplit, countTransactionsRange, deleteTransactionsRange, findDuplicateTransactions, deleteTransactionsByIds, recategorizeTransactions, aiCategorizeTransactions, flipTransactionSign } from '../api'
+import { createSplit, countTransactionsRange, deleteTransactionsRange, findDuplicateTransactions, deleteTransactionsByIds, recategorizeTransactions, aiCategorizeTransactions, flipTransactionSign, addManualRecurring } from '../api'
 
 type SortColumn = 'date' | 'description' | 'amount' | 'account' | 'category'
 type SortDir = 'asc' | 'desc'
@@ -81,6 +81,69 @@ export default function TransactionTable({
   const [splitAmount, setSplitAmount] = useState('')
   const [splitSaving, setSplitSaving] = useState(false)
   const [splitSuccess, setSplitSuccess] = useState<string | null>(null)
+
+  // "Make recurring" from a transaction row
+  const [recurringForm, setRecurringForm] = useState<{
+    tx: Transaction
+    label: string
+    amount: string
+    isIncome: boolean
+    day_of_month: string
+    frequency: 'monthly' | 'biweekly' | 'semimonthly'
+    interval_months: string
+    second_day_of_month: string
+    start_date: string
+    category_id: string
+  } | null>(null)
+  const [recurringSaving, setRecurringSaving] = useState(false)
+  const [recurringError, setRecurringError] = useState<string | null>(null)
+  const [recurringSavedFor, setRecurringSavedFor] = useState<string | null>(null)
+
+  function openMakeRecurring(tx: Transaction) {
+    const amtNum = parseFloat(tx.amount)
+    setRecurringError(null)
+    setRecurringForm({
+      tx,
+      label: tx.description,
+      amount: Math.abs(amtNum).toFixed(2),
+      isIncome: amtNum > 0,
+      day_of_month: tx.date.slice(8, 10),
+      frequency: 'monthly',
+      interval_months: '1',
+      second_day_of_month: '15',
+      start_date: tx.date,
+      category_id: tx.category_id ?? '',
+    })
+  }
+
+  async function handleSaveRecurring() {
+    if (!recurringForm) return
+    if (!recurringForm.label.trim()) { setRecurringError('Description is required'); return }
+    const day = parseInt(recurringForm.day_of_month)
+    if (isNaN(day) || day < 1 || day > 31) { setRecurringError('Day must be 1–31'); return }
+    let secondDay: number | undefined
+    if (recurringForm.frequency === 'semimonthly') {
+      secondDay = parseInt(recurringForm.second_day_of_month)
+      if (isNaN(secondDay) || secondDay < 1 || secondDay > 31) {
+        setRecurringError('Second day must be 1–31'); return
+      }
+    }
+    const cleanAmt = recurringForm.amount.replace(/[^0-9.]/g, '')
+    const signed = cleanAmt ? (recurringForm.isIncome ? cleanAmt : `-${cleanAmt}`) : ''
+    setRecurringSaving(true)
+    setRecurringError(null)
+    const res = await addManualRecurring(
+      recurringForm.label, signed, day,
+      parseInt(recurringForm.interval_months) || 1,
+      recurringForm.start_date, recurringForm.category_id,
+      recurringForm.frequency, secondDay,
+    )
+    setRecurringSaving(false)
+    if (!res.ok) { setRecurringError(res.error ?? 'Failed to save.'); return }
+    setRecurringSavedFor(recurringForm.tx.id)
+    setRecurringForm(null)
+    setTimeout(() => setRecurringSavedFor(null), 3500)
+  }
 
   // Bulk delete state
   const [showBulkDelete, setShowBulkDelete] = useState(false)
@@ -636,6 +699,7 @@ export default function TransactionTable({
                 </th>
                 <th className="px-4 py-3 w-8" />
                 <th className="px-4 py-3 w-8" />
+                <th className="px-4 py-3 w-8" />
               </tr>
             </thead>
             <tbody>
@@ -725,6 +789,19 @@ export default function TransactionTable({
                       </td>
                       <td className="px-2 py-2.5">
                         <button
+                          onClick={() => openMakeRecurring(tx)}
+                          className={`text-sm transition-colors ${
+                            recurringSavedFor === tx.id
+                              ? 'text-green-600'
+                              : 'text-gray-300 hover:text-green-600'
+                          }`}
+                          title="Make this a recurring payment"
+                        >
+                          {recurringSavedFor === tx.id ? '✓' : '↻'}
+                        </button>
+                      </td>
+                      <td className="px-2 py-2.5">
+                        <button
                           onClick={() => onDeleteTransaction(tx.id)}
                           className="text-gray-300 hover:text-red-500 transition-colors text-xs"
                           title="Delete transaction"
@@ -735,7 +812,7 @@ export default function TransactionTable({
                     </tr>
                     {isSplitOpen && (
                       <tr key={`split-${tx.id}`} className="bg-green-50 border-b">
-                        <td colSpan={7} className="px-4 py-2">
+                        <td colSpan={8} className="px-4 py-2">
                           {isSuccess ? (
                             <span className="text-sm text-green-600 font-medium">Split recorded!</span>
                           ) : (
@@ -784,6 +861,157 @@ export default function TransactionTable({
           </table>
         )}
       </div>
+
+      {/* Make-recurring modal — opened from the ↻ button in each row */}
+      {recurringForm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setRecurringForm(null)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-xl">
+              <h3 className="text-sm font-semibold text-gray-700">Make this a recurring payment</h3>
+              <button
+                onClick={() => setRecurringForm(null)}
+                className="text-gray-400 hover:text-gray-700"
+                title="Cancel"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <p className="text-xs text-gray-500 -mt-1">
+                Seeded from <span className="font-medium text-gray-700">{recurringForm.tx.description}</span> on{' '}
+                <span className="font-medium text-gray-700">{recurringForm.tx.date}</span>. Adjust anything below and save.
+              </p>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Description</label>
+                <input
+                  autoFocus
+                  value={recurringForm.label}
+                  onChange={(e) => setRecurringForm((f) => f && ({ ...f, label: e.target.value }))}
+                  className="w-full text-sm border rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-xs text-gray-500 block mb-1">Amount ($)</label>
+                  <input
+                    type="number" step="0.01"
+                    value={recurringForm.amount}
+                    onChange={(e) => setRecurringForm((f) => f && ({ ...f, amount: e.target.value }))}
+                    className="w-full text-sm border rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Type</label>
+                  <div className="flex border rounded overflow-hidden text-xs h-[34px]">
+                    <button type="button"
+                      onClick={() => setRecurringForm((f) => f && ({ ...f, isIncome: false }))}
+                      className={`px-3 transition-colors ${!recurringForm.isIncome ? 'bg-red-50 text-red-700 font-medium' : 'text-gray-500 hover:bg-gray-50'}`}
+                    >Expense</button>
+                    <button type="button"
+                      onClick={() => setRecurringForm((f) => f && ({ ...f, isIncome: true }))}
+                      className={`px-3 transition-colors ${recurringForm.isIncome ? 'bg-green-50 text-green-700 font-medium' : 'text-gray-500 hover:bg-gray-50'}`}
+                    >Income</button>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Frequency</label>
+                <select
+                  value={recurringForm.frequency !== 'monthly' ? `f:${recurringForm.frequency}` : `m:${recurringForm.interval_months}`}
+                  onChange={(e) => {
+                    const [kind, val] = e.target.value.split(':')
+                    if (kind === 'f') setRecurringForm((f) => f && ({ ...f, frequency: val as 'biweekly' | 'semimonthly' }))
+                    else setRecurringForm((f) => f && ({ ...f, frequency: 'monthly', interval_months: val }))
+                  }}
+                  className="w-full text-sm border rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-500"
+                >
+                  <option value="f:biweekly">Bi-weekly (every 2 weeks)</option>
+                  <option value="f:semimonthly">Bi-monthly (twice a month)</option>
+                  <option value="m:1">Monthly</option>
+                  <option value="m:3">Every 3 months</option>
+                  <option value="m:6">Every 6 months</option>
+                  <option value="m:12">Yearly</option>
+                </select>
+              </div>
+              {recurringForm.frequency === 'monthly' && (
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Day of month</label>
+                  <input type="number" min="1" max="31"
+                    value={recurringForm.day_of_month}
+                    onChange={(e) => setRecurringForm((f) => f && ({ ...f, day_of_month: e.target.value }))}
+                    className="w-24 text-sm border rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+              )}
+              {recurringForm.frequency === 'semimonthly' && (
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Days of month</label>
+                  <div className="flex items-center gap-2">
+                    <input type="number" min="1" max="31"
+                      value={recurringForm.day_of_month}
+                      onChange={(e) => setRecurringForm((f) => f && ({ ...f, day_of_month: e.target.value }))}
+                      className="w-20 text-sm border rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-500"
+                    />
+                    <span className="text-xs text-gray-400">and</span>
+                    <input type="number" min="1" max="31"
+                      value={recurringForm.second_day_of_month}
+                      onChange={(e) => setRecurringForm((f) => f && ({ ...f, second_day_of_month: e.target.value }))}
+                      className="w-20 text-sm border rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-500"
+                    />
+                  </div>
+                </div>
+              )}
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Starting from</label>
+                <input type="date"
+                  value={recurringForm.start_date}
+                  onChange={(e) => setRecurringForm((f) => f && ({ ...f, start_date: e.target.value }))}
+                  className="w-full text-sm border rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Category (optional)</label>
+                <select
+                  value={recurringForm.category_id}
+                  onChange={(e) => setRecurringForm((f) => f && ({ ...f, category_id: e.target.value }))}
+                  className="w-full text-sm border rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-500"
+                >
+                  <option value="">— no category —</option>
+                  {BUCKET_ORDER.filter((b) => groups[b]?.length).map((b) => (
+                    <optgroup key={b} label={b.charAt(0).toUpperCase() + b.slice(1)}>
+                      {groups[b].map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+              {recurringError && <p className="text-xs text-red-600">{recurringError}</p>}
+            </div>
+            <div className="px-5 py-3 border-t border-gray-100 bg-gray-50 flex gap-2 rounded-b-xl">
+              <button
+                onClick={handleSaveRecurring}
+                disabled={recurringSaving || !recurringForm.label.trim()}
+                className="flex-1 px-3 py-1.5 bg-green-700 text-white text-sm rounded hover:bg-green-800 disabled:opacity-40 transition-colors"
+              >
+                {recurringSaving ? 'Saving…' : 'Add recurring payment'}
+              </button>
+              <button
+                onClick={() => setRecurringForm(null)}
+                className="px-3 py-1.5 border border-gray-200 text-gray-500 text-sm rounded hover:bg-white transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
