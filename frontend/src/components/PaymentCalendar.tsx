@@ -3,7 +3,7 @@ import type { Category, CalendarTx, ScheduledItem, UpcomingScheduledItem, Manual
 import {
   getCalendarData, excludeRecurring, unexcludeRecurring, getRecurringExcluded,
   getManualRecurring, addManualRecurring, updateManualRecurring, deleteManualRecurring,
-  detectRecurring, saveDebtDueDay,
+  recurringCandidates, saveDebtDueDay,
   markRecurringPaid, unmarkRecurringPaid, getRecurringPaid,
 } from '../api'
 
@@ -329,7 +329,7 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
     setHistoryQuery('')
     if (historyOptions.length === 0) {
       setHistoryLoading(true)
-      const opts = await detectRecurring()
+      const opts = await recurringCandidates()
       setHistoryOptions(opts)
       setHistoryLoading(false)
     }
@@ -990,7 +990,7 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
                       <p className="px-3 py-3 text-xs text-gray-400 italic">Loading…</p>
                     ) : filteredHistory.length === 0 ? (
                       <p className="px-3 py-3 text-xs text-gray-400 italic">
-                        {historyQuery ? 'No matches.' : 'No recurring transactions detected yet.'}
+                        {historyQuery ? 'No matches.' : 'Import some transactions first, then any merchant that appears more than once will show here.'}
                       </p>
                     ) : (
                       <ul className="divide-y divide-gray-50">

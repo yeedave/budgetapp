@@ -1060,6 +1060,9 @@ class Api:
     def detect_recurring(self) -> list[dict]:
         return self._repo.detect_recurring()
 
+    def recurring_candidates(self) -> list[dict]:
+        return self._repo.recurring_candidates()
+
     def get_recurring_excluded(self) -> list[dict]:
         return self._repo.get_recurring_excluded()
 

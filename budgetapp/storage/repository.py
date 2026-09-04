@@ -1472,6 +1472,80 @@ class Repository:
         results.sort(key=lambda x: x["avg_amount"], reverse=True)
         return results[:50]
 
+    def recurring_candidates(self, min_occurrences: int = 2, limit: int = 300) -> list[dict]:
+        """Loose picker feed: every description that shows up more than once,
+        regardless of category, interval, or amount consistency.
+
+        Used by the "Pick from past transactions" picker so the user can seed
+        a manual recurring off ANY frequent transaction — not just the ones
+        detect_recurring flags as truly periodic. Ordered by occurrence count
+        so the most-common merchants surface first."""
+        from datetime import date
+        from collections import defaultdict
+
+        rows = self.conn.execute(
+            "SELECT date, description, CAST(amount AS REAL) AS amount FROM transactions "
+            "ORDER BY description, date"
+        ).fetchall()
+
+        normalize = self._normalize_desc
+        groups: dict[str, list[tuple]] = defaultdict(list)
+        for r in rows:
+            key = normalize(r["description"])
+            if not key:
+                continue
+            groups[key].append((r["date"], r["amount"], r["description"]))
+
+        results = []
+        for _key, entries in groups.items():
+            if len(entries) < min_occurrences:
+                continue
+            entries.sort(key=lambda x: x[0])
+            amounts = [abs(e[1]) for e in entries]
+            avg_amount = sum(amounts) / len(amounts)
+
+            # Median interval for display — may be wildly irregular, that's fine.
+            intervals: list[int] = []
+            for i in range(1, len(entries)):
+                try:
+                    d1 = date.fromisoformat(entries[i - 1][0])
+                    d2 = date.fromisoformat(entries[i][0])
+                    intervals.append((d2 - d1).days)
+                except Exception:
+                    pass
+            median_interval = 0
+            interval_type = "irregular"
+            if intervals:
+                sorted_intervals = sorted(intervals)
+                median_interval = sorted_intervals[len(sorted_intervals) // 2]
+                if 5 <= median_interval <= 9:
+                    interval_type = "weekly"
+                elif 12 <= median_interval <= 17:
+                    interval_type = "biweekly"
+                elif 25 <= median_interval <= 35:
+                    interval_type = "monthly"
+                elif 55 <= median_interval <= 95:
+                    interval_type = "quarterly"
+                elif 340 <= median_interval <= 380:
+                    interval_type = "yearly"
+
+            is_expense = entries[-1][1] < 0
+
+            results.append({
+                "description": entries[-1][2],
+                "occurrences": len(entries),
+                "avg_amount": round(avg_amount, 2),
+                "avg_interval": round(median_interval, 0),
+                "interval_type": interval_type,
+                "last_date": entries[-1][0],
+                "is_expense": is_expense,
+            })
+
+        # Sort by occurrence count (most frequent first) so the most-relevant
+        # candidates show near the top. Ties broken by recency.
+        results.sort(key=lambda x: (x["occurrences"], x["last_date"]), reverse=True)
+        return results[:limit]
+
     # ------------------------------------------------------------------
     # Budget guide
     # ------------------------------------------------------------------

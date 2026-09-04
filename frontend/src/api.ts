@@ -75,6 +75,7 @@ interface PywebviewApi {
   delete_asset: (asset_id: string) => Promise<void>
   get_monthly_trends: (months: string) => Promise<MonthlyTrends>
   detect_recurring: () => Promise<RecurringItem[]>
+  recurring_candidates: () => Promise<RecurringItem[]>
   get_recurring_excluded: () => Promise<{ normalized_description: string; sample_description: string; excluded_at: string }[]>
   exclude_recurring: (description: string) => Promise<{ ok: boolean; normalized_description?: string; error?: string }>
   unexclude_recurring: (normalized_description: string) => Promise<{ ok: boolean; error?: string }>
@@ -207,6 +208,7 @@ export const saveAsset = (asset: { id: string; name: string; value: string; asse
 export const deleteAsset = (assetId: string) => api().delete_asset(assetId)
 export const getMonthlyTrends = (months: string) => api().get_monthly_trends(months)
 export const detectRecurring = () => api().detect_recurring()
+export const recurringCandidates = () => api().recurring_candidates()
 export const getRecurringExcluded = () => api().get_recurring_excluded()
 export const excludeRecurring = (description: string) => api().exclude_recurring(description)
 export const unexcludeRecurring = (normalizedDescription: string) => api().unexclude_recurring(normalizedDescription)
