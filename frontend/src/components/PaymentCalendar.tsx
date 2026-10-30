@@ -6,6 +6,7 @@ import {
   recurringCandidates, saveDebtDueDay,
   markRecurringPaid, unmarkRecurringPaid, getRecurringPaid,
 } from '../api'
+import PaycheckPlanner from './PaycheckPlanner'
 
 type ExcludedItem = { normalized_description: string; sample_description: string; excluded_at: string }
 type PaidAheadItem = { normalized_label: string; scheduled_date: string; sample_label: string; marked_at: string }
@@ -695,6 +696,9 @@ export default function PaymentCalendar({ categories, onSetCategory }: Props) {
 
       {/* ── Right column: upcoming + manual recurring ────────────────── */}
       <aside className="space-y-4 lg:sticky lg:top-4">
+
+        {/* Paycheck-aware bill allocation */}
+        <PaycheckPlanner />
 
         {/* Cash needed — total due for the rest of the current calendar month */}
         {(() => {

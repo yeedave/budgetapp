@@ -1,8 +1,13 @@
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts'
-import type { Transaction, Category } from '../types'
-import { createSplit, flipTransactionSign } from '../api'
+import type { Transaction, Category, MonthlyTrends } from '../types'
+import { createSplit, flipTransactionSign, getMonthlyTrends, getUpcomingBills, getDebts } from '../api'
 import HelpTooltip from './HelpTooltip'
+import MonthlyTrendsChart from './MonthlyTrendsChart'
+import NetWorthCard from './NetWorthCard'
+import NotificationBanners from './NotificationBanners'
+import FinancialHealth from './FinancialHealth'
+import BudgetStrategyCard from './BudgetStrategyCard'
 
 interface Props {
   transactions: Transaction[]
@@ -10,10 +15,16 @@ interface Props {
   onSetCategory: (txId: string, categoryId: string) => void
   onDeleteTransaction: (txId: string) => Promise<void>
   onRefresh: () => void
+  onNavigate: (view: string) => void
+  selectedMonth: string
 }
 
 const fmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })
 const fmtAbs = (n: number) => fmt.format(Math.abs(n))
+const fmtCompact = (n: number) => {
+  if (Math.abs(n) >= 1000) return `$${(n / 1000).toFixed(1)}k`
+  return fmt.format(n)
+}
 
 const BUCKET_ORDER = ['income', 'bills', 'subscriptions', 'expenses', 'savings', 'debts', 'transfers']
 const BUCKET_LABEL: Record<string, string> = {
@@ -223,22 +234,19 @@ function TxDrillDown({
   )
 }
 
-export default function Dashboard({ transactions, categories, onSetCategory, onDeleteTransaction, onRefresh }: Props) {
+export default function Dashboard({ transactions, categories, onSetCategory, onDeleteTransaction, onRefresh, onNavigate, selectedMonth }: Props) {
   const [expandedCatId, setExpandedCatId] = useState<string | null>(null)
+  const [trendData, setTrendData] = useState<MonthlyTrends | null>(null)
+  const [actionItems, setActionItems] = useState<{ type: string; severity: string; title: string; body: string; action?: string }[]>([])
 
   function toggleExpand(catId: string) {
     setExpandedCatId((prev) => (prev === catId ? null : catId))
   }
 
-  // ── Category IDs excluded from income/expense totals ──
-  // Transfers: pure pass-throughs (CC payments, inter-account moves)
-  // Savings: contributions tracked separately; positive savings amounts (e.g. misrouted
-  //   deposits) must not inflate the income card
   const transferCatIds = new Set(
     categories.filter((c) => c.bucket === 'transfers' || c.bucket === 'savings').map((c) => c.id)
   )
 
-  // ── Income by owner ───────────────────────────────────────────────
   const incomeCatByOwner = Object.fromEntries(
     categories.filter((c) => c.bucket === 'income').map((c) => [c.id, c.owner])
   )
@@ -251,7 +259,6 @@ export default function Dashboard({ transactions, categories, onSetCategory, onD
     if (n > 0) incomeByOwner[owner] = (incomeByOwner[owner] ?? 0) + n
   }
 
-  // ── Summary numbers ───────────────────────────────────────────────
   let income = 0, expenses = 0, uncategorized = 0
   for (const tx of transactions) {
     if (tx.category_id && transferCatIds.has(tx.category_id)) continue
@@ -262,15 +269,12 @@ export default function Dashboard({ transactions, categories, onSetCategory, onD
   }
   const net = income + expenses
 
-  // ── Amounts by category_id ────────────────────────────────────────
   const byCategory: Record<string, number> = {}
   for (const tx of transactions) {
     if (!tx.category_id) continue
     byCategory[tx.category_id] = (byCategory[tx.category_id] ?? 0) + parseFloat(tx.amount)
   }
 
-  // ── Budget tracker rows ───────────────────────────────────────────
-  // Scale monthly budget targets by the number of distinct months visible
   const numMonths = Math.max(1, new Set(transactions.map((tx) => tx.date.slice(0, 7))).size)
 
   const BUDGET_BUCKETS = ['income', 'bills', 'subscriptions', 'expenses', 'savings', 'debts']
@@ -290,7 +294,6 @@ export default function Dashboard({ transactions, categories, onSetCategory, onD
       return b.pct - a.pct
     })
 
-  // ── Group categories into buckets ─────────────────────────────────
   const catMap = Object.fromEntries(categories.map((c) => [c.id, c]))
   const buckets: Record<string, { cat: Category; amount: number }[]> = {}
   for (const [catId, amount] of Object.entries(byCategory)) {
@@ -303,7 +306,6 @@ export default function Dashboard({ transactions, categories, onSetCategory, onD
     rows.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
   }
 
-  // ── Pie chart data ────────────────────────────────────────────────
   const pieData = BUCKET_ORDER
     .filter((b) => b !== 'income' && b !== 'transfers' && buckets[b]?.length)
     .map((b) => ({
@@ -313,15 +315,341 @@ export default function Dashboard({ transactions, categories, onSetCategory, onD
     }))
     .filter((d) => d.value > 0)
 
+  // ── Monthly Pulse: spending pace & month-over-month comparison ────
+  useEffect(() => {
+    getMonthlyTrends('3').then(setTrendData).catch(() => {})
+  }, [])
+
+  // Build action items from current data
+  useEffect(() => {
+    const items: typeof actionItems = []
+
+    // Debt payoff recommendation
+    getDebts().then((debts) => {
+      const activeDebts = debts.filter(d => d.balance && parseFloat(d.balance) > 0 && d.apr && parseFloat(d.apr) > 0)
+      if (activeDebts.length > 0) {
+        const highest = activeDebts.sort((a, b) => parseFloat(b.apr!) - parseFloat(a.apr!))[0]
+        const dailyInterest = (parseFloat(highest.balance!) * parseFloat(highest.apr!) / 100) / 365
+        items.unshift({
+          type: 'debt_recommendation',
+          severity: 'info',
+          title: `Focus extra payments on ${highest.name}`,
+          body: `At ${highest.apr}% APR, this debt costs ${fmt.format(dailyInterest * 30)}/mo in interest. Every extra dollar here saves the most.`,
+          action: 'debts',
+        })
+        setActionItems(prev => {
+          const filtered = prev.filter(i => i.type !== 'debt_recommendation')
+          return [...items.filter(i => i.type === 'debt_recommendation'), ...filtered]
+        })
+      }
+    }).catch(() => {})
+
+    getUpcomingBills().then((bills) => {
+      const soon = bills.filter(b => b.days_until <= 7)
+      if (soon.length > 0) {
+        const total = soon.reduce((s, b) => s + parseFloat(b.minimum ?? '0'), 0)
+        setActionItems(prev => {
+          const filtered = prev.filter(i => i.type !== 'upcoming_bills')
+          return [...filtered, {
+            type: 'upcoming_bills',
+            severity: 'warning',
+            title: `${soon.length} bill${soon.length > 1 ? 's' : ''} due within 7 days`,
+            body: `Total: ${fmt.format(total)}`,
+            action: 'calendar',
+          }]
+        })
+      }
+    }).catch(() => {})
+  }, [])
+
+  // Compute pace and comparison from trend data
+  const pulse = useMemo(() => {
+    const now = new Date()
+    const currentMonth = selectedMonth && !selectedMonth.startsWith('ytd:') ? selectedMonth : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    const isCurrentMonth = currentMonth === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+
+    const dayOfMonth = isCurrentMonth ? now.getDate() : new Date(currentMonth + '-28').getDate()
+    const daysInMonth = new Date(parseInt(currentMonth.slice(0, 4)), parseInt(currentMonth.slice(5, 7)), 0).getDate()
+    const timePct = isCurrentMonth ? Math.round((dayOfMonth / daysInMonth) * 100) : 100
+    const timeRemaining = isCurrentMonth ? daysInMonth - dayOfMonth : 0
+
+    const absExpenses = Math.abs(expenses)
+
+    // Get last month's data from trends
+    let lastMonthExpenses = 0
+    let categoryChanges: { name: string; change: number }[] = []
+
+    if (trendData && trendData.months.length >= 2) {
+      const expBuckets = ['bills', 'subscriptions', 'expenses', 'debts', 'savings']
+      const lastIdx = trendData.months.length - 2
+      for (const series of trendData.series) {
+        if (expBuckets.includes(series.bucket) && lastIdx >= 0) {
+          lastMonthExpenses += series.values[lastIdx] ?? 0
+        }
+      }
+    }
+
+    const spendingPct = lastMonthExpenses > 0 ? Math.round((absExpenses / lastMonthExpenses) * 100) : 0
+    const expenseChange = lastMonthExpenses > 0 ? absExpenses - lastMonthExpenses : 0
+    const expenseChangePct = lastMonthExpenses > 0 ? Math.round((expenseChange / lastMonthExpenses) * 100) : 0
+
+    // Determine pace verdict
+    let verdict = 'On track'
+    let verdictColor = 'text-green-600'
+    if (isCurrentMonth && spendingPct > 0) {
+      if (spendingPct > timePct + 15) {
+        verdict = 'Spending faster than usual'
+        verdictColor = 'text-red-600'
+      } else if (spendingPct > timePct + 5) {
+        verdict = 'Slightly ahead of pace'
+        verdictColor = 'text-amber-600'
+      } else if (spendingPct < timePct - 10) {
+        verdict = 'Ahead of plan'
+        verdictColor = 'text-green-600'
+      }
+    }
+
+    // Find top category changes
+    if (transactions.length > 0 && categories.length > 0) {
+      const currentByBucket: Record<string, number> = {}
+      for (const tx of transactions) {
+        if (!tx.category_id) continue
+        const cat = catMap[tx.category_id]
+        if (!cat || cat.bucket === 'income' || cat.bucket === 'transfers') continue
+        currentByBucket[cat.name] = (currentByBucket[cat.name] ?? 0) + Math.abs(parseFloat(tx.amount))
+      }
+      categoryChanges = Object.entries(currentByBucket)
+        .map(([name, amount]) => ({ name, change: amount }))
+        .sort((a, b) => b.change - a.change)
+        .slice(0, 3)
+    }
+
+    return {
+      currentMonth,
+      isCurrentMonth,
+      timePct,
+      timeRemaining,
+      spendingPct,
+      expenseChange,
+      expenseChangePct,
+      verdict,
+      verdictColor,
+      categoryChanges,
+      lastMonthExpenses,
+    }
+  }, [transactions, categories, trendData, expenses, selectedMonth, catMap])
+
+  // Build more action items from computed data
+  const allActionItems = useMemo(() => {
+    const items = [...actionItems]
+
+    if (uncategorized > 0) {
+      items.push({
+        type: 'uncategorized',
+        severity: 'warning',
+        title: `${uncategorized} transaction${uncategorized !== 1 ? 's' : ''} need review`,
+        body: 'Categorize them for accurate budget tracking.',
+        action: 'transactions',
+      })
+    }
+
+    const overBudget = budgetRows.filter(r => r.over)
+    if (overBudget.length > 0) {
+      const worst = overBudget[0]
+      items.push({
+        type: 'budget_overrun',
+        severity: 'action',
+        title: `${worst.cat.name} is over budget`,
+        body: `${fmtAbs(worst.spent)} spent vs ${fmtAbs(worst.budget)} budget.`,
+      })
+    }
+
+    if (pulse.isCurrentMonth && pulse.spendingPct > pulse.timePct + 15) {
+      items.push({
+        type: 'pace_alert',
+        severity: 'action',
+        title: 'Spending pace is high',
+        body: `You've used ${pulse.spendingPct}% of typical monthly expenses with ${100 - pulse.timePct}% of the month remaining.`,
+      })
+    }
+
+    return items.slice(0, 5)
+  }, [actionItems, uncategorized, budgetRows, pulse])
+
+  const monthLabel = (() => {
+    if (!pulse.currentMonth) return ''
+    const [y, m] = pulse.currentMonth.split('-')
+    const d = new Date(parseInt(y), parseInt(m) - 1)
+    return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  })()
+
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
+
+      {/* ── Notification banners ────────────────────────────────────── */}
+      <NotificationBanners onNavigate={onNavigate} />
+
+      {/* ── Action items ───────────────────────────────────────────── */}
+      {allActionItems.length > 0 && (
+        <div className="space-y-2">
+          {allActionItems.map((item, i) => (
+            <button
+              key={`${item.type}-${i}`}
+              onClick={() => item.action && onNavigate(item.action)}
+              className={`w-full text-left flex items-start gap-3 px-4 py-3 rounded-lg border transition-colors ${
+                item.severity === 'action' ? 'bg-red-50 border-red-200 hover:bg-red-100' :
+                item.severity === 'warning' ? 'bg-amber-50 border-amber-200 hover:bg-amber-100' :
+                item.severity === 'success' ? 'bg-green-50 border-green-200 hover:bg-green-100' :
+                'bg-blue-50 border-blue-200 hover:bg-blue-100'
+              }`}
+            >
+              <span className="text-lg shrink-0">
+                {item.severity === 'action' ? '!' : item.severity === 'warning' ? '!' : item.severity === 'success' ? '>' : '>'}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className={`text-sm font-medium ${
+                  item.severity === 'action' ? 'text-red-800' :
+                  item.severity === 'warning' ? 'text-amber-800' :
+                  item.severity === 'success' ? 'text-green-800' :
+                  'text-blue-800'
+                }`}>{item.title}</div>
+                <div className={`text-xs mt-0.5 ${
+                  item.severity === 'action' ? 'text-red-600' :
+                  item.severity === 'warning' ? 'text-amber-600' :
+                  item.severity === 'success' ? 'text-green-600' :
+                  'text-blue-600'
+                }`}>{item.body}</div>
+              </div>
+              {item.action && <span className="text-xs text-gray-400 shrink-0 mt-1">&rarr;</span>}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ── Monthly Pulse hero card ────────────────────────────────── */}
+      <div className="bg-white rounded-lg border px-6 py-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-800">{monthLabel}</h2>
+          <HelpTooltip text="Your monthly spending pace compared to typical expenses. The bar shows what percentage of your usual monthly spending you've used so far." />
+        </div>
+
+        <div className="grid grid-cols-3 gap-6 mb-5">
+          <div>
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Income</div>
+            <div className="text-xl font-bold text-green-600 tabular-nums">{fmt.format(income)}</div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Expenses</div>
+            <div className="text-xl font-bold text-red-600 tabular-nums">{fmtAbs(expenses)}</div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Left Over</div>
+            <div className={`text-xl font-bold tabular-nums ${net >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {net >= 0 ? fmt.format(net) : `−${fmtAbs(net)}`}
+            </div>
+            <div className="text-xs text-gray-400 mt-0.5">{net >= 0 ? 'saved this month' : 'over budget'}</div>
+          </div>
+        </div>
+
+        {/* Spending pace bar */}
+        {pulse.isCurrentMonth && pulse.lastMonthExpenses > 0 && (
+          <div className="mb-4">
+            <div className="flex items-center justify-between text-xs text-gray-500 mb-1.5">
+              <span>Spending pace</span>
+              <span>{pulse.spendingPct}% of typical · {pulse.timePct}% of month</span>
+            </div>
+            <div className="relative h-3 bg-gray-100 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  pulse.spendingPct > pulse.timePct + 15 ? 'bg-red-400' :
+                  pulse.spendingPct > pulse.timePct + 5 ? 'bg-amber-400' :
+                  'bg-green-400'
+                }`}
+                style={{ width: `${Math.min(pulse.spendingPct, 100)}%` }}
+              />
+              {/* Time marker */}
+              <div
+                className="absolute top-0 h-full w-0.5 bg-gray-400"
+                style={{ left: `${pulse.timePct}%` }}
+              />
+            </div>
+            <div className={`text-sm font-medium mt-2 ${pulse.verdictColor}`}>
+              {pulse.verdict}
+              {pulse.timeRemaining > 0 && (
+                <span className="text-gray-400 font-normal ml-2">· {pulse.timeRemaining} days remaining</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Month-over-month comparison */}
+        {pulse.lastMonthExpenses > 0 && pulse.expenseChange !== 0 && (
+          <div className="pt-3 border-t border-gray-100">
+            <div className="text-xs text-gray-500 mb-2">
+              vs. last month: Expenses {pulse.expenseChange > 0 ? '▲' : '▼'} {fmtAbs(pulse.expenseChange)} ({pulse.expenseChange > 0 ? '+' : ''}{pulse.expenseChangePct}%)
+            </div>
+            {pulse.categoryChanges.length > 0 && (
+              <div className="flex gap-4 text-xs text-gray-500">
+                {pulse.categoryChanges.map((c) => (
+                  <span key={c.name}>
+                    <span className="text-gray-700">{c.name}</span> {fmtCompact(c.change)}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Secondary summary cards ────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <SummaryCard label="Income" value={fmt.format(income)} color="text-green-600"
+          tooltip="Total income received across all imported accounts." />
+        <SummaryCard label="Expenses" value={fmtAbs(expenses)} color="text-red-600"
+          tooltip="Total money spent. Excludes internal transfers." />
+        <SummaryCard label="Left Over" value={fmt.format(net)} color={net >= 0 ? 'text-green-600' : 'text-red-600'}
+          sub={net >= 0 ? 'saved' : 'over budget'}
+          tooltip="Income minus expenses." />
+        <SummaryCard label="Needs Review" value={String(uncategorized)}
+          color={uncategorized > 0 ? 'text-amber-600' : 'text-gray-400'}
+          sub={uncategorized > 0 ? 'to categorize' : 'all clear'}
+          tooltip="Transactions without a category. Go to the Transactions tab to categorize them." />
+      </div>
+
+      {/* ── Income by earner ───────────────────────────────────────── */}
+      {Object.keys(incomeByOwner).length > 1 && (
+        <div className="bg-white rounded-lg border divide-y">
+          <div className="px-5 py-3 flex items-center gap-2 text-sm font-semibold text-gray-500 uppercase tracking-wider">
+            Income by Earner
+            <HelpTooltip text="Breakdown of income by earner. Set owner on income categories in the Categories tab." />
+          </div>
+          <div className="px-5 py-4 flex gap-6 flex-wrap">
+            {Object.entries(incomeByOwner).map(([owner, amt]) => (
+              <div key={owner} className="flex flex-col gap-1">
+                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider capitalize">{owner}</div>
+                <div className="text-xl font-bold text-green-600 tabular-nums">{fmt.format(amt)}</div>
+                <div className="text-xs text-gray-400">{income > 0 ? Math.round((amt / income) * 100) : 0}% of total</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Monthly Trends chart ───────────────────────────────────── */}
+      <MonthlyTrendsChart />
+
+      {/* ── Financial Health ───────────────────────────────────────── */}
+      <FinancialHealth />
+
+      {/* ── Budget Strategy 50/30/20 ───────────────────────────────── */}
+      <BudgetStrategyCard />
 
       {/* ── Spending distribution pie ──────────────────────────────── */}
       {pieData.length > 0 && (
         <div className="bg-white rounded-lg border px-5 py-4">
           <div className="flex items-center gap-2 text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">
             Spending Distribution
-            <HelpTooltip text="Shows how your spending is split across budget buckets for the selected month. Only includes categorized transactions." />
+            <HelpTooltip text="Shows how your spending is split across category groups for the selected period. Only includes categorized transactions." />
           </div>
           <ResponsiveContainer width="100%" height={260}>
             <PieChart>
@@ -351,40 +679,6 @@ export default function Dashboard({ transactions, categories, onSetCategory, onD
               />
             </PieChart>
           </ResponsiveContainer>
-        </div>
-      )}
-
-      {/* ── Summary cards ──────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <SummaryCard label="Income" value={fmt.format(income)} color="text-green-600"
-          tooltip="Total income received this month across all imported accounts." />
-        <SummaryCard label="Expenses" value={fmtAbs(expenses)} color="text-red-600"
-          tooltip="Total money spent this month. Excludes internal transfers." />
-        <SummaryCard label="Net" value={fmt.format(net)} color={net >= 0 ? 'text-green-600' : 'text-red-600'}
-          sub={net >= 0 ? 'saved' : 'over budget'}
-          tooltip="Income minus expenses." />
-        <SummaryCard label="Uncategorized" value={String(uncategorized)}
-          color={uncategorized > 0 ? 'text-amber-600' : 'text-gray-400'}
-          sub={uncategorized > 0 ? 'need review' : 'all clear'}
-          tooltip="Transactions without a category. Go to the Transactions tab to categorize them." />
-      </div>
-
-      {/* ── Income by earner ───────────────────────────────────────── */}
-      {Object.keys(incomeByOwner).length > 1 && (
-        <div className="bg-white rounded-lg border divide-y">
-          <div className="px-5 py-3 flex items-center gap-2 text-sm font-semibold text-gray-500 uppercase tracking-wider">
-            Income by Earner
-            <HelpTooltip text="Breakdown of income by earner. Set owner on income categories in the Categories tab." />
-          </div>
-          <div className="px-5 py-4 flex gap-6 flex-wrap">
-            {Object.entries(incomeByOwner).map(([owner, amt]) => (
-              <div key={owner} className="flex flex-col gap-1">
-                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider capitalize">{owner}</div>
-                <div className="text-xl font-bold text-green-600 tabular-nums">{fmt.format(amt)}</div>
-                <div className="text-xs text-gray-400">{income > 0 ? Math.round((amt / income) * 100) : 0}% of total</div>
-              </div>
-            ))}
-          </div>
         </div>
       )}
 
@@ -454,7 +748,7 @@ export default function Dashboard({ transactions, categories, onSetCategory, onD
         <div className="bg-white rounded-lg border divide-y overflow-hidden">
           <div className="px-5 py-3 flex items-center gap-2 text-sm font-semibold text-gray-500 uppercase tracking-wider">
             Spending Breakdown
-            <HelpTooltip text="Detailed breakdown by bucket and category. Click a category to see and re-categorize its transactions." />
+            <HelpTooltip text="Detailed breakdown by category group and category. Click a category to see and re-categorize its transactions." />
           </div>
           {BUCKET_ORDER.filter((b) => buckets[b]?.length).map((bucket) => {
             const rows = buckets[bucket]
@@ -514,12 +808,17 @@ export default function Dashboard({ transactions, categories, onSetCategory, onD
 
           {uncategorized > 0 && (
             <div className="px-5 py-3 flex items-center justify-between text-sm text-amber-600">
-              <span>{uncategorized} transaction{uncategorized !== 1 ? 's' : ''} uncategorized</span>
-              <span className="text-xs text-gray-400">switch to Transactions to review</span>
+              <span>{uncategorized} transaction{uncategorized !== 1 ? 's' : ''} need review</span>
+              <button onClick={() => onNavigate('transactions')} className="text-xs text-amber-700 hover:underline">
+                Go to Transactions &rarr;
+              </button>
             </div>
           )}
         </div>
       )}
+
+      {/* ── Net Worth (compact) ────────────────────────────────────── */}
+      <NetWorthCard compact />
 
       {transactions.length === 0 && (
         <div className="text-center text-gray-400 text-sm py-16">
@@ -536,12 +835,12 @@ function SummaryCard({
   label: string; value: string; color: string; sub?: string; tooltip?: string
 }) {
   return (
-    <div className="bg-white rounded-lg border px-5 py-4">
+    <div className="bg-white rounded-lg border px-4 py-3">
       <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
         {label}
         {tooltip && <HelpTooltip text={tooltip} />}
       </div>
-      <div className={`text-2xl font-bold tabular-nums ${color}`}>{value}</div>
+      <div className={`text-lg font-bold tabular-nums ${color}`}>{value}</div>
       {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
     </div>
   )

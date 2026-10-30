@@ -69,6 +69,11 @@ class Api:
         saved = self.get_settings()
         if saved.get("anthropic_api_key") and not os.environ.get("ANTHROPIC_API_KEY"):
             os.environ["ANTHROPIC_API_KEY"] = saved["anthropic_api_key"]
+        # Snapshot net worth on startup
+        try:
+            self._repo.snapshot_net_worth()
+        except Exception:
+            pass
 
     def set_window(self, window) -> None:
         self._window = window
@@ -432,9 +437,17 @@ class Api:
             spend_cats = tracker.get("spend_categories") or []
             if isinstance(spend_cats, list):
                 self._repo.set_tracker_spend_categories(t_id, [str(c) for c in spend_cats if c])
+        try:
+            self._repo.snapshot_net_worth()
+        except Exception:
+            pass
 
     def delete_savings_tracker(self, tracker_id: str) -> None:
         self._repo.delete_savings_tracker(tracker_id)
+        try:
+            self._repo.snapshot_net_worth()
+        except Exception:
+            pass
 
     def get_debts(self) -> list[dict]:
         return self._repo.get_debts()
@@ -449,7 +462,7 @@ class Api:
         def _clean(v):
             return str(_to_float(v)) if v not in (None, "", "null") else None
 
-        return self._repo.upsert_debt(
+        result = self._repo.upsert_debt(
             id=debt["id"],
             name=debt["name"],
             balance=_clean(debt.get("balance")),
@@ -457,9 +470,18 @@ class Api:
             minimum=_clean(debt.get("minimum")),
             months_remaining=months_remaining,
         )
+        try:
+            self._repo.snapshot_net_worth()
+        except Exception:
+            pass
+        return result
 
     def delete_debt(self, debt_id: str) -> None:
         self._repo.delete_debt(debt_id)
+        try:
+            self._repo.snapshot_net_worth()
+        except Exception:
+            pass
 
     def get_debt_plan(self, extra_monthly: str) -> dict:
         from decimal import Decimal
@@ -1041,9 +1063,17 @@ class Api:
         # Normalize "19,470.84" / "$19,470.84" → "19470.84" so Decimal() can read it later
         clean_value = str(_to_float(asset.get("value", "0")))
         self._repo.upsert_asset(a_id, asset["name"], clean_value, asset.get("asset_type", "other"))
+        try:
+            self._repo.snapshot_net_worth()
+        except Exception:
+            pass
 
     def delete_asset(self, asset_id: str) -> None:
         self._repo.delete_asset(asset_id)
+        try:
+            self._repo.snapshot_net_worth()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Monthly trends
@@ -1798,6 +1828,108 @@ class Api:
 
         out_path.write_text(json.dumps(data, indent=2, default=str))
         return {"ok": True, "path": str(out_path)}
+
+    # ------------------------------------------------------------------
+    # Financial Health & Insights
+    # ------------------------------------------------------------------
+
+    def get_financial_health(self) -> dict:
+        try:
+            return self._repo.get_financial_health()
+        except Exception as exc:
+            return {"metrics": [], "score": 0, "error": str(exc)}
+
+    def get_insights(self) -> list:
+        try:
+            return self._repo.get_insights()
+        except Exception as exc:
+            return [{"type": "error", "severity": "warning",
+                     "title": "Could not compute insights",
+                     "body": str(exc)}]
+
+    def get_notifications(self) -> list:
+        try:
+            return self._repo.get_notifications()
+        except Exception as exc:
+            return []
+
+    # ------------------------------------------------------------------
+    # Net Worth Snapshots
+    # ------------------------------------------------------------------
+
+    def snapshot_net_worth(self) -> dict:
+        try:
+            self._repo.snapshot_net_worth()
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def get_net_worth_history(self, months: str = "12") -> list:
+        try:
+            n = max(1, min(120, int(months or "12")))
+            return self._repo.get_net_worth_history(n)
+        except Exception as exc:
+            return []
+
+    # ------------------------------------------------------------------
+    # Paycheck Configs
+    # ------------------------------------------------------------------
+
+    def get_paycheck_configs(self) -> list:
+        return self._repo.get_paycheck_configs()
+
+    def save_paycheck_config(self, config: dict) -> dict:
+        try:
+            if not config.get("id"):
+                import re
+                config["id"] = re.sub(
+                    r'[^a-z0-9]+', '_',
+                    (config.get("earner") or "paycheck").lower()
+                ).strip('_')[:40]
+            self._repo.save_paycheck_config(config)
+            return {"ok": True, "id": config["id"]}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def delete_paycheck_config(self, config_id: str) -> dict:
+        try:
+            self._repo.delete_paycheck_config(config_id)
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Paycheck Plan
+    # ------------------------------------------------------------------
+
+    def get_paycheck_plan(self, paycheck_date: str, next_paycheck_date: str) -> dict:
+        try:
+            return self._repo.get_paycheck_plan(paycheck_date, next_paycheck_date)
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Budget Strategy (50/30/20)
+    # ------------------------------------------------------------------
+
+    def get_budget_strategy(self) -> dict:
+        try:
+            return self._repo.get_budget_strategy()
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Monthly Report
+    # ------------------------------------------------------------------
+
+    def get_monthly_report(self, month: str = "") -> dict:
+        try:
+            if not month:
+                from datetime import date
+                month = date.today().strftime("%Y-%m")
+            return self._repo.get_monthly_report(month)
+        except Exception as exc:
+            return {"error": str(exc)}
 
     # ------------------------------------------------------------------
     # Advisor skills file

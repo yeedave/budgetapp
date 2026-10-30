@@ -27,11 +27,17 @@ If you've ever tried to make a budget spreadsheet and given up because it's too 
 - **Reads your bank statements** — download a PDF from your bank's website, drop it into the app, and every transaction gets read in seconds. Chase, Wells Fargo, Apple Card, and Marcus HYSA are all supported.
 - **Learns your habits** — the first time you tell it "Netflix is a Streaming charge", it remembers, and every future Netflix charge gets tagged automatically.
 - **Shows you where your money goes** — a donut chart per month, budget progress bars per category, and monthly trends over time.
-- **Helps with debt** — track loans and credit cards, see a payoff plan with different strategies, and watch your progress as balances drop.
+- **Helps you crush debt** — track loans and credit cards, see a payoff plan with Avalanche and Snowball strategies, daily interest cost per debt, estimated payoff dates, and a recommendation on where extra payments save the most.
+- **Paycheck-aware scheduling** — tell the app when you get paid, and it allocates your bills and debt payments per paycheck so you know exactly what to pay from each check.
+- **Financial health score** — five CFP-style indicators (Emergency Fund, Debt-to-Income, Savings Rate, Fixed vs Variable, Budget Adherence) with a composite score out of 100.
+- **Net worth tracking** — assets, savings, and debts in one view with history over time.
+- **Smart notifications** — proactive banners for bills due soon, budget overruns, and debt milestones.
+- **Monthly report card** — letter grade (A-F), top spending categories, spending spikes, and milestones.
+- **50/30/20 budget strategy** — see how your actual spending maps to Needs, Wants, and Savings & Payoff targets.
 - **Handles savings goals** — set up an "envelope" like a Daughter Fund, link expense categories to it, and any spending on those categories automatically deducts from the envelope.
 - **Reminds you what's coming up** — a payment calendar shows every bill due this month and how much cash you'll need per paycheck.
 - **Between statements? No problem** — copy-paste transactions straight from your bank's website for same-day updates.
-- **Optional AI assistant** — if you want, plug in an Anthropic API key and chat with Claude about your actual finances.
+- **Optional AI assistant** — plug in an Anthropic API key and chat with Claude about your actual finances. Promoted to a primary tab for quick access.
 
 ---
 
@@ -172,12 +178,18 @@ That's the setup. From now on, once a month you download a statement, drag it in
 
 ### Dashboard
 
-Your monthly report card. Big cards at the top show income, expenses, and what you kept. A donut chart shows where money went by category. Progress bars show whether you're staying under budget in each category.
+Your financial command center. At the top, a **Monthly Pulse** card shows your spending pace — how much you've spent vs how far through the month you are — so you can tell at a glance whether you're on track. Below that:
 
-If you want to dig into a single category, **click its bar**. You'll see every transaction in it. From there you can:
+- **Action Items** — proactive suggestions like "pay $X extra to your highest-APR debt" and upcoming bills
+- **Notification banners** — alerts for bills due soon, budget categories running hot, and debt milestones
+- **Summary cards** — Income, Expenses, Left Over, and Needs Review (uncategorized count)
+- **Monthly Trends** — income vs spending area chart with 6/12/24 month toggle
+- **Financial Health** — composite score out of 100 based on five CFP-style ratios
+- **Budget Strategy** — your actual spending mapped to 50/30/20 (Needs/Wants/Savings & Payoff)
+- **Spending Distribution** — donut chart + budget tracker bars
+- **Net Worth** — compact summary with assets, savings, and debts
 
-- **Click the dollar amount** to switch a transaction between income and expense (useful when a refund got imported as an expense)
-- **Hover a row** to see split (⎘) and delete (✕) buttons
+Click any budget bar to drill into its transactions.
 
 ### Transactions
 
@@ -191,13 +203,16 @@ The complete list of every transaction, ever. This is where you spend most of yo
 - **Find Duplicates** — scans for the same transaction imported twice
 - **Auto-organize** — re-runs all your rules against any uncategorized transactions
 
-### Debts
+### Debts & Savings
 
 Track what you owe and plan payoff.
 
 - Add each debt with its current balance, APR, and minimum monthly payment
 - Set a due day so the calendar knows when to remind you
-- Play with the **payoff planner**: enter how much extra you can put toward debt each month and see two scenarios — Avalanche (attack highest APR first) and Snowball (attack smallest balance first)
+- **Interest cost breakdown** — see exactly how much each debt costs you per day and per month, sorted by cost so the most expensive ones stand out
+- **Payoff planner** — enter how much extra you can put toward debt each month and see two scenarios — Avalanche (attack highest APR first) and Snowball (attack smallest balance first)
+- **Estimated payoff dates** — see when each debt will be eliminated under the recommended strategy
+- **Net Worth** — full view with asset management (vehicles, real estate, investments, retirement, cash) and balance history chart
 - **Savings trackers** live at the bottom — for money you're setting aside instead of paying off. Envelope-style: link expense categories to a tracker and spending on those categories deducts from the envelope automatically.
 
 ### Categories
@@ -218,8 +233,9 @@ Add, edit, delete, and reorder your accounts. Also shows an **import log** at th
 
 A calendar showing every bill due this month, paydays in green, and any recurring payments the app has detected.
 
-The right sidebar has two really useful cards:
+The right sidebar has:
 
+- **Paycheck Planner** — set up your pay schedule once, then see exactly which bills and debt payments come out of each paycheck, how much extra goes to high-APR debt, and how much you have left for variable spending. Shows interest savings vs equal-split payments.
 - **Cash needed** — the total you need to cover the rest of this month, broken down by source (debt payments / bills / recurring / expected income)
 - **Upcoming Payments** — every bill or expected income in the month you're viewing. Hover to edit or remove.
 
@@ -233,15 +249,15 @@ There's also an **+ Add recurring payment** panel for setting up things the app 
 
 For expenses someone else owes you part of. Say you paid $80 for a dinner with a friend who owes $40. Create a split on the transaction, enter their name and the amount they owe. The transaction gets divided into two — your $40 stays as regular spending, and their $40 becomes a "Owed by [name]" transaction that doesn't count against your budget. Mark it settled when they pay you back.
 
-### Advisor
+### AI Advisor
 
-An AI chatbot (Claude) that has read your actual financial data and answers questions like "should I pay off my car loan or invest that money?" or "which subscriptions could I cut?"
+An AI chatbot (Claude) that has read your actual financial data and answers questions like "should I pay off my car loan or invest that money?" or "which subscriptions could I cut?" Acts as a personal CFP-style advisor with persistent chat history.
 
 Requires you to enter an Anthropic API key (get one at console.anthropic.com — costs a few cents per conversation). Everything stays local — the app just sends the current chat message to Anthropic, gets a reply, and shows it to you.
 
-### Guide
+### Report Card
 
-A step-by-step categorization walkthrough. If you have a bunch of uncategorized transactions, this is the fastest way to blast through them.
+Monthly letter grade (A-F) based on budget adherence, savings rate, and spending discipline. Shows top spending categories, unusual spikes, and milestones reached.
 
 ### Settings
 
@@ -428,6 +444,7 @@ budgetapp/
 │   ├── core/
 │   │   ├── models.py              dataclasses
 │   │   ├── categorizer.py         rule-based + AI categorization
+│   │   ├── budget.py              50/30/20 budget strategy analysis
 │   │   ├── debt_planner.py        Avalanche / Snowball algorithms
 │   │   └── paste_parser.py        text-paste parser (Chase / WF websites)
 │   ├── storage/

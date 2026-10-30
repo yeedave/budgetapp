@@ -290,6 +290,8 @@ def init_db(db_path: Path) -> sqlite3.Connection:
     _migrate_import_log(conn)
     _migrate_split_tx_id(conn)
     _migrate_manual_recurring_frequency(conn)
+    _migrate_net_worth_snapshots(conn)
+    _migrate_paycheck_configs(conn)
     conn.commit()
     return conn
 
@@ -452,6 +454,32 @@ def _migrate_wf_checking_account(conn: sqlite3.Connection) -> None:
         "INSERT OR IGNORE INTO accounts (id, name, bank, account_type, owner) VALUES (?,?,?,?,?)",
         ("wells_fargo_checking", "Wells Fargo Checking", "wells_fargo", "checking", "primary"),
     )
+
+
+def _migrate_net_worth_snapshots(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS net_worth_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month TEXT NOT NULL UNIQUE,
+            total_assets TEXT NOT NULL,
+            total_savings TEXT NOT NULL,
+            total_debts TEXT NOT NULL,
+            net_worth TEXT NOT NULL,
+            snapshot_at TEXT NOT NULL
+        )
+    """)
+
+
+def _migrate_paycheck_configs(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS paycheck_configs (
+            id TEXT PRIMARY KEY,
+            earner TEXT NOT NULL,
+            frequency TEXT NOT NULL DEFAULT 'semimonthly',
+            days TEXT NOT NULL,
+            estimated_amount TEXT NOT NULL DEFAULT '0'
+        )
+    """)
 
 
 def _seed_debts_if_empty(conn: sqlite3.Connection) -> None:

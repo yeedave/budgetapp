@@ -15,8 +15,9 @@ import SplitsManager from './components/SplitsManager'
 import BudgetGuide from './components/BudgetGuide'
 import Advisor from './components/Advisor'
 import PaymentCalendar from './components/PaymentCalendar'
+import ReportCard from './components/ReportCard'
 
-type View = 'dashboard' | 'transactions' | 'debts' | 'categories' | 'accounts' | 'calculator' | 'progress' | 'splits' | 'guide' | 'advisor' | 'calendar' | 'settings'
+type View = 'dashboard' | 'transactions' | 'debts' | 'categories' | 'accounts' | 'calculator' | 'progress' | 'splits' | 'guide' | 'advisor' | 'calendar' | 'settings' | 'report'
 
 function usePywebviewReady() {
   const [ready, setReady] = useState(!!window.pywebview?.api)
@@ -29,18 +30,15 @@ function usePywebviewReady() {
   return ready
 }
 
-const VALID_VIEWS: View[] = ['dashboard', 'transactions', 'debts', 'categories', 'accounts', 'calculator', 'progress', 'splits', 'guide', 'advisor', 'calendar', 'settings']
+const VALID_VIEWS: View[] = ['dashboard', 'transactions', 'debts', 'categories', 'accounts', 'calculator', 'progress', 'splits', 'guide', 'advisor', 'calendar', 'settings', 'report']
 
-const PRIMARY_VIEWS: View[] = ['dashboard', 'transactions', 'debts', 'categories', 'accounts', 'calendar']
-// Progress tab hidden from menu but retained in the codebase — flip back on
-// by adding 'progress' to this list. Rendering, imports, and route handler
-// below are intentionally left intact.
-const MORE_VIEWS: View[] = ['advisor', 'calculator', 'splits', 'guide', 'settings']
+const PRIMARY_VIEWS: View[] = ['dashboard', 'transactions', 'debts', 'calendar', 'advisor']
+const MORE_VIEWS: View[] = ['calculator', 'report', 'categories', 'accounts', 'splits', 'settings']
 const VIEW_LABEL: Record<View, string> = {
-  dashboard: 'Dashboard', transactions: 'Transactions', debts: 'Debts',
+  dashboard: 'Dashboard', transactions: 'Transactions', debts: 'Debts & Savings',
   categories: 'Categories', accounts: 'Accounts', progress: 'Progress',
   calculator: 'Calculator', splits: 'Splits', guide: 'Guide', advisor: 'AI Advisor',
-  calendar: 'Calendar', settings: 'Settings',
+  calendar: 'Calendar', settings: 'Settings', report: 'Report Card',
 }
 
 function persist(key: string, value: string) {
@@ -247,6 +245,8 @@ export default function App() {
               onSetCategory={handleSetCategory}
               onDeleteTransaction={handleDeleteTransaction}
               onRefresh={loadTransactions}
+              onNavigate={(v: string) => handleViewChange(v as View)}
+              selectedMonth={selectedMonth}
             />
           )}
           {view === 'transactions' && (
@@ -289,6 +289,7 @@ export default function App() {
           )}
           {view === 'advisor' && <Advisor />}
           {view === 'calendar' && <PaymentCalendar categories={categories} onSetCategory={handleSetCategory} />}
+          {view === 'report' && <ReportCard />}
           {view === 'settings' && <SettingsManager />}
         </main>
       </div>

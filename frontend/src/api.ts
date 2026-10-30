@@ -1,4 +1,4 @@
-import type { Account, Category, Transaction, ImportResult, DebtItem, DebtPlan, SavingsTracker, ProgressData, Rule, BudgetSnapshot, NetWorth, MonthlyTrends, RecurringItem, UpcomingBill, Split, ImportLogEntry, ActivityLogEntry, BudgetGuideData, CalendarData, GenerateRulesResult, CategorySuggestion, RuleSuggestion, UpcomingScheduledItem, ManualRecurring } from './types'
+import type { Account, Category, Transaction, ImportResult, DebtItem, DebtPlan, SavingsTracker, ProgressData, Rule, BudgetSnapshot, NetWorth, MonthlyTrends, RecurringItem, UpcomingBill, Split, ImportLogEntry, ActivityLogEntry, BudgetGuideData, CalendarData, GenerateRulesResult, CategorySuggestion, RuleSuggestion, UpcomingScheduledItem, ManualRecurring, FinancialHealth, Insight, Notification, NetWorthSnapshot, PaycheckConfig, PaycheckPlan, BudgetStrategy, MonthlyReport } from './types'
 
 // Extend Window with the pywebview API shape
 interface PywebviewApi {
@@ -114,6 +114,17 @@ interface PywebviewApi {
   export_rules_categories: () => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
   get_advisor_skills: () => Promise<{ content: string; path: string }>
   save_advisor_skills: (content: string) => Promise<{ ok: boolean; error?: string }>
+  get_financial_health: () => Promise<FinancialHealth>
+  get_insights: () => Promise<Insight[]>
+  get_notifications: () => Promise<Notification[]>
+  get_net_worth_history: (months: string) => Promise<NetWorthSnapshot[]>
+  snapshot_net_worth: () => Promise<void>
+  get_paycheck_configs: () => Promise<PaycheckConfig[]>
+  save_paycheck_config: (config: PaycheckConfig) => Promise<void>
+  delete_paycheck_config: (config_id: string) => Promise<void>
+  get_paycheck_plan: (paycheck_date: string, next_paycheck_date: string) => Promise<PaycheckPlan>
+  get_budget_strategy: () => Promise<BudgetStrategy>
+  get_monthly_report: (month: string) => Promise<MonthlyReport>
   find_duplicate_transactions: () => Promise<{ key: string[]; transactions: { id: string; date: string; description: string; amount: string; account_id: string; category_id: string | null }[] }[]>
   delete_transactions_by_ids: (ids: string[]) => Promise<{ ok: boolean; deleted: number }>
   recategorize_transactions: (mode: string) => Promise<{ ok: boolean; updated: number; error?: string }>
@@ -272,6 +283,17 @@ export const applyRuleSuggestions = (newCategories: CategorySuggestion[], rules:
 export const exportRulesCategories = () => api().export_rules_categories()
 export const getAdvisorSkills = () => api().get_advisor_skills()
 export const saveAdvisorSkills = (content: string) => api().save_advisor_skills(content)
+export const getFinancialHealth = () => api().get_financial_health()
+export const getInsights = () => api().get_insights()
+export const getNotifications = () => api().get_notifications()
+export const getNetWorthHistory = (months = '24') => api().get_net_worth_history(months)
+export const snapshotNetWorth = () => api().snapshot_net_worth()
+export const getPaycheckConfigs = () => api().get_paycheck_configs()
+export const savePaycheckConfig = (config: PaycheckConfig) => api().save_paycheck_config(config)
+export const deletePaycheckConfig = (configId: string) => api().delete_paycheck_config(configId)
+export const getPaycheckPlan = (paycheckDate: string, nextPaycheckDate: string) => api().get_paycheck_plan(paycheckDate, nextPaycheckDate)
+export const getBudgetStrategy = () => api().get_budget_strategy()
+export const getMonthlyReport = (month: string) => api().get_monthly_report(month)
 export const findDuplicateTransactions = () => api().find_duplicate_transactions()
 export const deleteTransactionsByIds = (ids: string[]) => api().delete_transactions_by_ids(ids)
 export const recategorizeTransactions = (mode: string) => api().recategorize_transactions(mode)

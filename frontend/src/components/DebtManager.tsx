@@ -5,6 +5,7 @@ import {
 } from 'recharts'
 import type { Category, DebtItem, DebtPlan, DebtPlanResult, SavingsTracker } from '../types'
 import HelpTooltip from './HelpTooltip'
+import NetWorthCard from './NetWorthCard'
 import {
   getDebts, saveDebt, deleteDebt, getDebtPlan,
   linkDebtCategory, getSavingsTrackers, saveSavingsTracker, deleteSavingsTracker,
@@ -694,6 +695,53 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
         </table>
       </div>
 
+      {/* ── Interest cost breakdown ──────────────────────────────── */}
+      {(() => {
+        const activeDebts = rows
+          .filter(r => r.balance && parseFloat(r.balance) > 0 && r.apr && parseFloat(r.apr) > 0)
+          .map(r => {
+            const bal = parseFloat(r.balance)
+            const aprPct = parseFloat(r.apr) / 100
+            const dailyCost = (bal * aprPct) / 365
+            const monthlyCost = dailyCost * 30
+            return { name: r.name, balance: bal, apr: parseFloat(r.apr), dailyCost, monthlyCost }
+          })
+          .sort((a, b) => b.monthlyCost - a.monthlyCost)
+
+        if (activeDebts.length === 0) return null
+
+        const totalMonthly = activeDebts.reduce((s, d) => s + d.monthlyCost, 0)
+
+        return (
+          <div className="bg-white rounded-lg border">
+            <div className="px-5 py-3 border-b">
+              <div className="flex items-center gap-2 text-sm font-semibold text-gray-500 uppercase tracking-wider">
+                Interest Cost
+                <HelpTooltip text="How much each debt costs you in interest every month. The highest-APR debt costs the most per dollar of balance — that's why the avalanche method targets it first." />
+              </div>
+            </div>
+            <div className="divide-y">
+              {activeDebts.map(d => (
+                <div key={d.name} className="px-5 py-3 flex items-center gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-gray-700 truncate">{d.name}</div>
+                    <div className="text-xs text-gray-400">{d.apr.toFixed(1)}% APR · {fmt.format(d.balance)} balance</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-sm font-semibold text-red-600 tabular-nums">{fmt.format(d.monthlyCost)}/mo</div>
+                    <div className="text-xs text-gray-400 tabular-nums">{fmt.format(d.dailyCost)}/day</div>
+                  </div>
+                </div>
+              ))}
+              <div className="px-5 py-3 flex items-center justify-between bg-gray-50">
+                <span className="text-sm font-medium text-gray-600">Total interest cost</span>
+                <span className="text-sm font-bold text-red-600 tabular-nums">{fmt.format(totalMonthly)}/mo</span>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* ── Payoff planner ────────────────────────────────────────── */}
       <div className="bg-white rounded-lg border">
         <div className="px-5 py-3 border-b">
@@ -791,6 +839,29 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
                 </div>
               )}
 
+              {/* Estimated payoff dates */}
+              {plan.avalanche.payoff_order.length > 0 && (
+                <div className="bg-white rounded border">
+                  <div className="px-4 py-2 border-b">
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Estimated Payoff Dates (Avalanche)</div>
+                  </div>
+                  <div className="divide-y">
+                    {plan.avalanche.payoff_order.map((name, idx) => {
+                      const now = new Date()
+                      const cumulativeMonths = Math.round((idx + 1) * plan.avalanche!.months / plan.avalanche!.payoff_order.length)
+                      const payoffDate = new Date(now.getFullYear(), now.getMonth() + cumulativeMonths)
+                      const dateStr = payoffDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+                      return (
+                        <div key={name} className="px-4 py-2 flex items-center justify-between">
+                          <span className="text-sm text-gray-700">{name}</span>
+                          <span className="text-sm font-medium text-green-700 tabular-nums">{dateStr}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Payoff timeline chart */}
               {timelineData && (
                 <div>
@@ -836,6 +907,10 @@ export default function DebtManager({ categories }: { categories: Category[] }) 
           )}
         </div>
       </div>
+
+      {/* ── Net Worth (full view with asset management) ────────────── */}
+      <NetWorthCard />
+
     </div>
   )
 }

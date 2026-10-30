@@ -281,6 +281,99 @@ export interface UpcomingBill {
   days_until: number
 }
 
+export interface FinancialHealthMetric {
+  name: string
+  value: number
+  formatted: string
+  status: 'healthy' | 'watch' | 'action'
+  target: string
+  description: string
+}
+
+export interface FinancialHealth {
+  metrics: FinancialHealthMetric[]
+  score: number
+}
+
+export interface Insight {
+  type: string
+  severity: 'info' | 'warning' | 'action' | 'success'
+  title: string
+  body: string
+}
+
+export interface Notification {
+  type: string
+  severity: 'info' | 'warning' | 'action' | 'success'
+  title: string
+  body: string
+  action_view?: string
+}
+
+export interface NetWorthSnapshot {
+  month: string
+  total_assets: number
+  total_savings: number
+  total_debts: number
+  net_worth: number
+}
+
+export interface PaycheckConfig {
+  id: string
+  earner: string
+  frequency: 'semimonthly' | 'biweekly' | 'weekly' | 'monthly'
+  days: number[]
+  estimated_amount: number
+}
+
+export interface PaycheckPlanItem {
+  label: string
+  amount: number
+  type: 'bill' | 'debt_minimum' | 'debt_extra' | 'savings'
+  debt_id?: string
+  due_date?: string
+}
+
+export interface PaycheckPlan {
+  paycheck_date: string
+  next_paycheck_date: string
+  estimated_income: number
+  items: PaycheckPlanItem[]
+  total_bills: number
+  total_debt_minimums: number
+  total_debt_extra: number
+  total_savings: number
+  remaining_variable: number
+  interest_saved_vs_equal: number
+}
+
+export interface BudgetStrategy {
+  strategy_name: string
+  buckets: {
+    name: string
+    target_pct: number
+    actual_pct: number
+    actual_amount: number
+    target_amount: number
+    over: boolean
+  }[]
+  monthly_income: number
+}
+
+export interface MonthlyReport {
+  month: string
+  income: number
+  expenses: number
+  net: number
+  savings_rate: number
+  budget_adherence: number
+  grade: string
+  top_categories: { name: string; amount: number; change: number }[]
+  spikes: { name: string; amount: number; average: number; pct_above: number }[]
+  debts_paid_off: string[]
+  goals_reached: string[]
+}
+
 export interface BudgetGuideItem {
   description: string
   avg_amount: number

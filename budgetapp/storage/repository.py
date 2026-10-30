@@ -2049,6 +2049,946 @@ class Repository:
         return counts
 
     # ------------------------------------------------------------------
+    # Financial Health Metrics
+    # ------------------------------------------------------------------
+
+    def get_financial_health(self) -> dict:
+        """Compute 5 CFP-style financial health ratios and a composite score."""
+        from decimal import Decimal
+
+        # Gather data via bridge-level helpers — call repo methods directly
+        # to avoid circular import.  We build a snapshot manually.
+        from datetime import date, timedelta
+
+        n = 3  # months to average
+        today = date.today()
+        first_of_current = today.replace(day=1)
+        end_date = first_of_current - timedelta(days=1)
+        start_date = end_date.replace(day=1)
+        for _ in range(n - 1):
+            start_date = (start_date - timedelta(days=1)).replace(day=1)
+
+        bucket_rows = self.conn.execute(
+            """SELECT c.bucket, SUM(CAST(t.amount AS REAL)) AS total
+               FROM transactions t
+               JOIN categories c ON t.category_id = c.id
+               WHERE t.date >= ? AND t.date <= ? AND c.bucket != 'transfers'
+               GROUP BY c.bucket""",
+            (start_date.isoformat(), end_date.isoformat()),
+        ).fetchall()
+        by_bucket = {r["bucket"]: Decimal(str(r["total"])) for r in bucket_rows}
+
+        monthly_income = by_bucket.get("income", Decimal("0")) / n
+        monthly_bills = abs(by_bucket.get("bills", Decimal("0"))) / n
+        monthly_subs = abs(by_bucket.get("subscriptions", Decimal("0"))) / n
+        monthly_expenses = abs(by_bucket.get("expenses", Decimal("0"))) / n
+        monthly_debt_payments = abs(by_bucket.get("debts", Decimal("0"))) / n
+        monthly_savings = abs(by_bucket.get("savings", Decimal("0"))) / n
+
+        total_outflow = monthly_bills + monthly_subs + monthly_expenses + monthly_debt_payments + monthly_savings
+
+        # Total savings balance
+        trackers = self.get_savings_trackers()
+        total_savings_balance = sum(Decimal(t.get("balance") or "0") for t in trackers)
+
+        # Debt minimums
+        debts = self.get_debts()
+        total_minimums = sum(Decimal(d.get("minimum") or "0") for d in debts)
+
+        # Monthly essentials for emergency fund calc
+        monthly_essentials = monthly_bills + monthly_subs + monthly_expenses
+
+        # Category budget adherence
+        cat_rows = self.conn.execute(
+            """SELECT t.category_id, c.budget_amount,
+                      ABS(SUM(CAST(t.amount AS REAL))) AS total_spent
+               FROM transactions t
+               JOIN categories c ON t.category_id = c.id
+               WHERE t.date LIKE ? AND c.bucket NOT IN ('transfers', 'income')
+                 AND c.budget_amount IS NOT NULL
+               GROUP BY t.category_id""",
+            (f"{today.strftime('%Y-%m')}-%",),
+        ).fetchall()
+        cats_with_budget = len(cat_rows)
+        cats_at_or_under = sum(
+            1 for r in cat_rows
+            if Decimal(str(r["total_spent"])) <= Decimal(r["budget_amount"])
+        )
+
+        # ── Compute 5 metrics ───────────────────────────────────────
+        metrics = []
+
+        # 1. Emergency Fund Ratio
+        if monthly_essentials > 0:
+            ef_ratio = float(total_savings_balance / monthly_essentials)
+        else:
+            ef_ratio = float(total_savings_balance) if total_savings_balance > 0 else 0.0
+        if ef_ratio >= 6:
+            ef_status = "healthy"
+        elif ef_ratio >= 3:
+            ef_status = "watch"
+        else:
+            ef_status = "action"
+        metrics.append({
+            "name": "Emergency Fund",
+            "value": round(ef_ratio, 1),
+            "formatted": f"{ef_ratio:.1f} months",
+            "status": ef_status,
+            "target": "6 months",
+            "description": "Months of essential expenses covered by savings",
+        })
+
+        # 2. Debt-to-Income
+        if monthly_income > 0:
+            dti = float(total_minimums / monthly_income)
+        else:
+            dti = 0.0
+        if dti < 0.20:
+            dti_status = "healthy"
+        elif dti <= 0.36:
+            dti_status = "watch"
+        else:
+            dti_status = "action"
+        metrics.append({
+            "name": "Debt-to-Income",
+            "value": round(dti, 3),
+            "formatted": f"{dti * 100:.1f}%",
+            "status": dti_status,
+            "target": "Under 20%",
+            "description": "Monthly debt minimums as percentage of income",
+        })
+
+        # 3. Savings Rate
+        if monthly_income > 0:
+            savings_rate = float((monthly_savings + monthly_debt_payments) / monthly_income)
+        else:
+            savings_rate = 0.0
+        if savings_rate >= 0.20:
+            sr_status = "healthy"
+        elif savings_rate >= 0.10:
+            sr_status = "watch"
+        else:
+            sr_status = "action"
+        metrics.append({
+            "name": "Savings Rate",
+            "value": round(savings_rate, 3),
+            "formatted": f"{savings_rate * 100:.1f}%",
+            "status": sr_status,
+            "target": "20%+",
+            "description": "Savings + debt payments as percentage of income",
+        })
+
+        # 4. Fixed vs Variable (Flexibility)
+        if total_outflow > 0:
+            fixed_ratio = float(
+                (monthly_bills + monthly_subs + monthly_debt_payments) / total_outflow
+            )
+        else:
+            fixed_ratio = 0.0
+        if fixed_ratio < 0.60:
+            flex_status = "healthy"
+        elif fixed_ratio <= 0.70:
+            flex_status = "watch"
+        else:
+            flex_status = "action"
+        metrics.append({
+            "name": "Fixed vs Variable",
+            "value": round(fixed_ratio, 3),
+            "formatted": f"{fixed_ratio * 100:.1f}%",
+            "status": flex_status,
+            "target": "Under 60%",
+            "description": "Fixed costs (bills + subs + debt) as share of total outflow",
+        })
+
+        # 5. Budget Adherence
+        if cats_with_budget > 0:
+            adherence = cats_at_or_under / cats_with_budget
+        else:
+            adherence = 1.0  # no budgets set → not penalized
+        if adherence >= 0.80:
+            adh_status = "healthy"
+        elif adherence >= 0.50:
+            adh_status = "watch"
+        else:
+            adh_status = "action"
+        metrics.append({
+            "name": "Budget Adherence",
+            "value": round(adherence, 3),
+            "formatted": f"{adherence * 100:.0f}%",
+            "status": adh_status,
+            "target": "80%+",
+            "description": "Percentage of budgeted categories at or under budget",
+        })
+
+        # ── Composite score (0-100) ─────────────────────────────────
+        def _score(metric: dict) -> float:
+            """Map a metric to a 0-1 score based on its thresholds."""
+            name = metric["name"]
+            v = metric["value"]
+            if name == "Emergency Fund":
+                return min(1.0, v / 6.0)
+            elif name == "Debt-to-Income":
+                if v <= 0.0:
+                    return 1.0
+                if v < 0.20:
+                    return 1.0 - (v / 0.20) * 0.2
+                if v <= 0.36:
+                    return 0.6 - ((v - 0.20) / 0.16) * 0.3
+                return max(0.0, 0.3 - ((v - 0.36) / 0.24) * 0.3)
+            elif name == "Savings Rate":
+                return min(1.0, v / 0.20)
+            elif name == "Fixed vs Variable":
+                if v < 0.60:
+                    return 1.0
+                if v <= 0.70:
+                    return 0.8 - ((v - 0.60) / 0.10) * 0.3
+                return max(0.0, 0.5 - ((v - 0.70) / 0.30) * 0.5)
+            elif name == "Budget Adherence":
+                return min(1.0, v / 0.80) if v < 0.80 else 1.0
+            return 0.5
+
+        weights = {
+            "Emergency Fund": 0.30,
+            "Savings Rate": 0.25,
+            "Debt-to-Income": 0.20,
+            "Budget Adherence": 0.15,
+            "Fixed vs Variable": 0.10,
+        }
+        composite = sum(weights.get(m["name"], 0) * _score(m) for m in metrics)
+        score = round(composite * 100, 1)
+
+        return {"metrics": metrics, "score": score}
+
+    # ------------------------------------------------------------------
+    # Proactive Insights
+    # ------------------------------------------------------------------
+
+    def get_insights(self) -> list[dict]:
+        """Return a list of proactive financial insights."""
+        from datetime import date, timedelta
+        from decimal import Decimal
+        from collections import defaultdict
+
+        today = date.today()
+        insights: list[dict] = []
+
+        # Helper: get monthly spend by bucket for a given YYYY-MM
+        def _monthly_bucket_spend(yyyy_mm: str) -> dict[str, Decimal]:
+            rows = self.conn.execute(
+                """SELECT c.bucket, SUM(CAST(t.amount AS REAL)) AS total
+                   FROM transactions t
+                   JOIN categories c ON t.category_id = c.id
+                   WHERE t.date LIKE ? AND c.bucket NOT IN ('transfers', 'income')
+                   GROUP BY c.bucket""",
+                (f"{yyyy_mm}-%",),
+            ).fetchall()
+            return {r["bucket"]: abs(Decimal(str(r["total"]))) for r in rows}
+
+        def _monthly_category_spend(yyyy_mm: str) -> dict[str, Decimal]:
+            rows = self.conn.execute(
+                """SELECT t.category_id, c.name, c.bucket,
+                          ABS(SUM(CAST(t.amount AS REAL))) AS total
+                   FROM transactions t
+                   JOIN categories c ON t.category_id = c.id
+                   WHERE t.date LIKE ? AND c.bucket NOT IN ('transfers', 'income')
+                   GROUP BY t.category_id""",
+                (f"{yyyy_mm}-%",),
+            ).fetchall()
+            return {r["category_id"]: {"name": r["name"], "bucket": r["bucket"],
+                                       "total": Decimal(str(r["total"]))} for r in rows}
+
+        # Current and past months
+        current_month = today.strftime("%Y-%m")
+        past_months = []
+        d = today.replace(day=1)
+        for _ in range(6):
+            d = (d - timedelta(days=1)).replace(day=1)
+            past_months.append(d.strftime("%Y-%m"))
+        past_months.reverse()
+
+        # 1. Spending anomaly: current month vs 3-month average by bucket
+        if len(past_months) >= 3:
+            recent_3 = past_months[-3:]
+            avg_by_bucket: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+            for m in recent_3:
+                for bucket, total in _monthly_bucket_spend(m).items():
+                    avg_by_bucket[bucket] += total / 3
+            current_spend = _monthly_bucket_spend(current_month)
+            for bucket, current_val in current_spend.items():
+                if bucket in ("income",):
+                    continue
+                avg = avg_by_bucket.get(bucket, Decimal("0"))
+                if avg > 0 and current_val > avg * Decimal("1.3"):
+                    pct_over = float((current_val - avg) / avg * 100)
+                    insights.append({
+                        "type": "spending_anomaly",
+                        "severity": "warning",
+                        "title": f"{bucket.title()} spending is {pct_over:.0f}% above average",
+                        "body": (
+                            f"You've spent ${float(current_val):,.2f} on {bucket} this month, "
+                            f"vs a 3-month average of ${float(avg):,.2f}."
+                        ),
+                    })
+
+        # 2. Subscription creep: check if subscriptions increased 3+ consecutive months
+        if len(past_months) >= 3:
+            sub_totals = []
+            for m in past_months[-4:] if len(past_months) >= 4 else past_months[-3:]:
+                spend = _monthly_bucket_spend(m)
+                sub_totals.append(spend.get("subscriptions", Decimal("0")))
+            increasing_streak = 0
+            for i in range(1, len(sub_totals)):
+                if sub_totals[i] > sub_totals[i - 1]:
+                    increasing_streak += 1
+                else:
+                    increasing_streak = 0
+            if increasing_streak >= 3:
+                insights.append({
+                    "type": "subscription_creep",
+                    "severity": "warning",
+                    "title": "Subscription costs rising steadily",
+                    "body": (
+                        f"Your subscription spending has increased for {increasing_streak} "
+                        f"consecutive months. Consider auditing for unused services."
+                    ),
+                })
+
+        # 3. Income variability
+        if len(past_months) >= 3:
+            income_totals = []
+            for m in past_months[-6:]:
+                rows = self.conn.execute(
+                    """SELECT SUM(CAST(t.amount AS REAL)) AS total
+                       FROM transactions t
+                       JOIN categories c ON t.category_id = c.id
+                       WHERE t.date LIKE ? AND c.bucket = 'income'""",
+                    (f"{m}-%",),
+                ).fetchall()
+                val = float(rows[0]["total"] or 0) if rows else 0.0
+                if val > 0:
+                    income_totals.append(val)
+            if len(income_totals) >= 3:
+                import statistics
+                mean_inc = statistics.mean(income_totals)
+                if mean_inc > 0:
+                    stdev_inc = statistics.stdev(income_totals)
+                    cv = stdev_inc / mean_inc
+                    if cv > 0.15:
+                        insights.append({
+                            "type": "income_variability",
+                            "severity": "info",
+                            "title": "Income varies significantly month-to-month",
+                            "body": (
+                                f"Your income coefficient of variation is {cv * 100:.0f}%. "
+                                f"Consider building a larger emergency fund to buffer volatility."
+                            ),
+                        })
+
+        # 4. Emergency fund gap
+        trackers = self.get_savings_trackers()
+        total_savings = sum(Decimal(t.get("balance") or "0") for t in trackers)
+        if past_months:
+            recent_3 = past_months[-3:]
+            essentials = Decimal("0")
+            for m in recent_3:
+                spend = _monthly_bucket_spend(m)
+                for b in ("bills", "subscriptions", "expenses"):
+                    essentials += spend.get(b, Decimal("0"))
+            monthly_essentials = essentials / max(1, len(recent_3))
+            if monthly_essentials > 0:
+                months_covered = total_savings / monthly_essentials
+                if months_covered < 3:
+                    gap = (monthly_essentials * 3) - total_savings
+                    insights.append({
+                        "type": "emergency_fund_gap",
+                        "severity": "action",
+                        "title": "Emergency fund below 3-month target",
+                        "body": (
+                            f"You have {float(months_covered):.1f} months of essential expenses saved. "
+                            f"You need ${float(gap):,.2f} more to reach a 3-month cushion."
+                        ),
+                    })
+
+        # 5. Budget gaps: categories with spending but no budget_amount
+        cat_rows = self.conn.execute(
+            """SELECT c.id, c.name, c.bucket, c.budget_amount,
+                      ABS(SUM(CAST(t.amount AS REAL))) AS total
+               FROM transactions t
+               JOIN categories c ON t.category_id = c.id
+               WHERE t.date LIKE ? AND c.bucket NOT IN ('transfers', 'income')
+                 AND c.budget_amount IS NULL
+               GROUP BY c.id
+               HAVING total > 0
+               ORDER BY total DESC""",
+            (f"{current_month}-%",),
+        ).fetchall()
+        if len(cat_rows) >= 3:
+            names = [r["name"] for r in cat_rows[:5]]
+            insights.append({
+                "type": "budget_gaps",
+                "severity": "info",
+                "title": f"{len(cat_rows)} spending categories have no budget set",
+                "body": (
+                    f"Categories like {', '.join(names)} have spending but no budget. "
+                    f"Setting budgets helps track overspending."
+                ),
+            })
+
+        # 6. Debt momentum
+        debts = self.get_debts()
+        for d in debts:
+            balance = Decimal(d.get("balance") or "0")
+            minimum = Decimal(d.get("minimum") or "0")
+            apr = Decimal(d.get("apr") or "0")
+            if balance > 0 and minimum > 0:
+                monthly_rate = apr / 100 / 12
+                if minimum > balance * monthly_rate:
+                    # Months to payoff
+                    import math
+                    if monthly_rate > 0:
+                        months = math.ceil(
+                            -math.log(1 - float(balance * monthly_rate / minimum))
+                            / math.log(1 + float(monthly_rate))
+                        )
+                    else:
+                        months = math.ceil(float(balance / minimum))
+                    payoff_date = today + timedelta(days=months * 30)
+                    severity = "success" if months <= 12 else "info"
+                    insights.append({
+                        "type": "debt_momentum",
+                        "severity": severity,
+                        "title": f"{d['name']}: ~{months} months to payoff",
+                        "body": (
+                            f"At current minimum of ${float(minimum):,.2f}/mo, "
+                            f"estimated payoff around {payoff_date.strftime('%B %Y')}."
+                        ),
+                    })
+
+        return insights
+
+    # ------------------------------------------------------------------
+    # Dashboard Notifications
+    # ------------------------------------------------------------------
+
+    def get_notifications(self) -> list[dict]:
+        """Return urgent alerts for Dashboard banners."""
+        from datetime import date, timedelta
+        from decimal import Decimal
+
+        today = date.today()
+        notifications: list[dict] = []
+
+        # 1. Bills due within 5 days
+        upcoming = self.get_upcoming_scheduled(days_ahead=5)
+        for item in upcoming:
+            if item.get("source") in ("debt", "manual", "recurring"):
+                try:
+                    due = date.fromisoformat(item["date"])
+                    days_until = (due - today).days
+                except Exception:
+                    continue
+                if 0 <= days_until <= 5:
+                    notifications.append({
+                        "type": "bill_due",
+                        "severity": "warning" if days_until <= 2 else "info",
+                        "title": f"{item['label']} due {'today' if days_until == 0 else f'in {days_until} day' + ('s' if days_until != 1 else '')}",
+                        "body": f"Amount: ${float(Decimal(item.get('amount') or '0')):,.2f}" if item.get("amount") else "",
+                        "action_view": "calendar",
+                    })
+
+        # 2. Budget categories at >80% utilization
+        current_month = today.strftime("%Y-%m")
+        cat_rows = self.conn.execute(
+            """SELECT t.category_id, c.name, c.budget_amount,
+                      ABS(SUM(CAST(t.amount AS REAL))) AS total_spent
+               FROM transactions t
+               JOIN categories c ON t.category_id = c.id
+               WHERE t.date LIKE ? AND c.bucket NOT IN ('transfers', 'income')
+                 AND c.budget_amount IS NOT NULL
+               GROUP BY t.category_id""",
+            (f"{current_month}-%",),
+        ).fetchall()
+        for r in cat_rows:
+            try:
+                spent = Decimal(str(r["total_spent"]))
+                budget = Decimal(r["budget_amount"])
+                if budget > 0:
+                    utilization = spent / budget
+                    if utilization > Decimal("1.0"):
+                        notifications.append({
+                            "type": "budget_exceeded",
+                            "severity": "action",
+                            "title": f"{r['name']} is over budget",
+                            "body": f"Spent ${float(spent):,.2f} of ${float(budget):,.2f} budget ({float(utilization * 100):.0f}%)",
+                            "action_view": "transactions",
+                        })
+                    elif utilization > Decimal("0.8"):
+                        notifications.append({
+                            "type": "budget_warning",
+                            "severity": "warning",
+                            "title": f"{r['name']} is at {float(utilization * 100):.0f}% of budget",
+                            "body": f"Spent ${float(spent):,.2f} of ${float(budget):,.2f}",
+                            "action_view": "transactions",
+                        })
+            except Exception:
+                continue
+
+        # 3. Debt milestones
+        debts = self.get_debts()
+        for d in debts:
+            balance = Decimal(d.get("balance") or "0")
+            if balance <= 0:
+                continue
+            # Approximate historical max: current balance + total payments made
+            # (sum of negative transactions against the debt's category)
+            cat_id = d.get("category_id")
+            if cat_id:
+                paid_row = self.conn.execute(
+                    """SELECT ABS(SUM(CAST(amount AS REAL))) AS total_paid
+                       FROM transactions
+                       WHERE category_id = ? AND CAST(amount AS REAL) < 0""",
+                    (cat_id,),
+                ).fetchone()
+                total_paid = Decimal(str(paid_row["total_paid"] or "0"))
+            else:
+                total_paid = Decimal("0")
+            historical_max = balance + total_paid
+            if historical_max > 0 and total_paid > 0:
+                remaining_pct = float(balance / historical_max)
+                if remaining_pct <= 0.25:
+                    notifications.append({
+                        "type": "debt_milestone",
+                        "severity": "success",
+                        "title": f"{d['name']}: under 25% remaining!",
+                        "body": f"Balance ${float(balance):,.2f} — you've paid off over 75% of this debt.",
+                        "action_view": "debts",
+                    })
+                elif remaining_pct <= 0.50:
+                    notifications.append({
+                        "type": "debt_milestone",
+                        "severity": "success",
+                        "title": f"{d['name']}: halfway paid off!",
+                        "body": f"Balance ${float(balance):,.2f} — you've paid off over 50%.",
+                        "action_view": "debts",
+                    })
+                elif remaining_pct <= 0.75:
+                    notifications.append({
+                        "type": "debt_milestone",
+                        "severity": "info",
+                        "title": f"{d['name']}: 25% paid off",
+                        "body": f"Balance ${float(balance):,.2f} — keep going!",
+                        "action_view": "debts",
+                    })
+
+        return notifications
+
+    # ------------------------------------------------------------------
+    # Net Worth Snapshots
+    # ------------------------------------------------------------------
+
+    def snapshot_net_worth(self) -> None:
+        """Upsert the current month's net worth snapshot."""
+        from datetime import datetime
+        from decimal import Decimal
+
+        nw = self.get_net_worth()
+        month = datetime.now().strftime("%Y-%m")
+        self.conn.execute(
+            """INSERT INTO net_worth_snapshots
+               (month, total_assets, total_savings, total_debts, net_worth, snapshot_at)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(month) DO UPDATE SET
+                 total_assets=excluded.total_assets,
+                 total_savings=excluded.total_savings,
+                 total_debts=excluded.total_debts,
+                 net_worth=excluded.net_worth,
+                 snapshot_at=excluded.snapshot_at""",
+            (
+                month,
+                str(nw["total_assets"]),
+                str(nw["total_savings"]),
+                str(nw["total_debts"]),
+                str(nw["net_worth"]),
+                datetime.now().isoformat(),
+            ),
+        )
+        self.conn.commit()
+
+    def get_net_worth_history(self, n: int = 12) -> list[dict]:
+        """Return the last N monthly net worth snapshots."""
+        rows = self.conn.execute(
+            "SELECT * FROM net_worth_snapshots ORDER BY month DESC LIMIT ?",
+            (n,),
+        ).fetchall()
+        result = [{k: r[k] for k in r.keys()} for r in rows]
+        result.reverse()  # chronological order
+        return result
+
+    # ------------------------------------------------------------------
+    # Paycheck Configs
+    # ------------------------------------------------------------------
+
+    def get_paycheck_configs(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM paycheck_configs ORDER BY earner, id"
+        ).fetchall()
+        return [{k: r[k] for k in r.keys()} for r in rows]
+
+    def save_paycheck_config(self, config: dict) -> None:
+        self.conn.execute(
+            """INSERT INTO paycheck_configs (id, earner, frequency, days, estimated_amount)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 earner=excluded.earner, frequency=excluded.frequency,
+                 days=excluded.days, estimated_amount=excluded.estimated_amount""",
+            (
+                config["id"],
+                config["earner"],
+                config.get("frequency", "semimonthly"),
+                config["days"],
+                config.get("estimated_amount", "0"),
+            ),
+        )
+        self.conn.commit()
+
+    def delete_paycheck_config(self, config_id: str) -> None:
+        self.conn.execute("DELETE FROM paycheck_configs WHERE id = ?", (config_id,))
+        self.conn.commit()
+
+    # ------------------------------------------------------------------
+    # Paycheck Plan
+    # ------------------------------------------------------------------
+
+    def get_paycheck_plan(self, paycheck_date: str, next_paycheck_date: str) -> dict:
+        """Compute a bill allocation plan between two paycheck dates."""
+        from datetime import date, timedelta
+        from decimal import Decimal
+
+        pay_date = date.fromisoformat(paycheck_date)
+        next_date = date.fromisoformat(next_paycheck_date)
+
+        # Estimated income from paycheck configs
+        configs = self.get_paycheck_configs()
+        estimated_income = Decimal("0")
+        for cfg in configs:
+            # Check if any pay day falls on or near the paycheck_date
+            days = [int(d.strip()) for d in cfg["days"].split(",") if d.strip()]
+            for day in days:
+                try:
+                    check_date = pay_date.replace(day=min(day, 28))
+                except ValueError:
+                    continue
+                if abs((check_date - pay_date).days) <= 2:
+                    estimated_income += Decimal(cfg.get("estimated_amount") or "0")
+                    break
+        # If no config matched, use average monthly income / 2 as estimate
+        if estimated_income == 0:
+            from datetime import timedelta
+            n = 3
+            today = date.today()
+            first_of_current = today.replace(day=1)
+            end_d = first_of_current - timedelta(days=1)
+            start_d = end_d.replace(day=1)
+            for _ in range(n - 1):
+                start_d = (start_d - timedelta(days=1)).replace(day=1)
+            inc_row = self.conn.execute(
+                """SELECT SUM(CAST(t.amount AS REAL)) AS total
+                   FROM transactions t
+                   JOIN categories c ON t.category_id = c.id
+                   WHERE t.date >= ? AND t.date <= ? AND c.bucket = 'income'""",
+                (start_d.isoformat(), end_d.isoformat()),
+            ).fetchone()
+            monthly_avg = Decimal(str(inc_row["total"] or "0")) / n
+            estimated_income = monthly_avg / 2  # assume semi-monthly
+
+        # Find all scheduled items between the two dates
+        items: list[dict] = []
+        total_required = Decimal("0")
+
+        # Debt due dates
+        debts = self.get_debts()
+        for d in debts:
+            due_day = d.get("due_day")
+            if not due_day:
+                continue
+            minimum = Decimal(d.get("minimum") or "0")
+            # Check if due_day falls in range
+            import calendar as cal_mod
+            for month_offset in range(3):
+                anchor = (pay_date.replace(day=1) + timedelta(days=32 * month_offset)).replace(day=1)
+                last_day = cal_mod.monthrange(anchor.year, anchor.month)[1]
+                actual_day = min(int(due_day), last_day)
+                try:
+                    due_date = date(anchor.year, anchor.month, actual_day)
+                except ValueError:
+                    continue
+                if pay_date <= due_date < next_date:
+                    items.append({
+                        "label": d["name"],
+                        "due_date": due_date.isoformat(),
+                        "amount": str(minimum),
+                        "type": "debt",
+                        "apr": d.get("apr"),
+                        "balance": d.get("balance"),
+                    })
+                    total_required += minimum
+                    break
+
+        # Manual recurring in range
+        for rec in self.get_manual_recurring():
+            amt = Decimal(rec.get("amount") or "0")
+            if amt >= 0:
+                continue  # skip income entries
+            range_end = next_date - timedelta(days=1)
+            for occ in self._project_manual_occurrences(rec, pay_date, range_end):
+                items.append({
+                    "label": rec["label"],
+                    "due_date": occ.isoformat(),
+                    "amount": str(abs(amt)),
+                    "type": "recurring",
+                    "apr": None,
+                    "balance": None,
+                })
+                total_required += abs(amt)
+
+        extra_available = estimated_income - total_required
+        interest_saved = Decimal("0")
+
+        # Allocate extra to highest-APR debt (avalanche)
+        extra_allocations: list[dict] = []
+        if extra_available > 0:
+            debt_items = [i for i in items if i["type"] == "debt" and i.get("apr")]
+            debt_items.sort(key=lambda x: Decimal(x["apr"] or "0"), reverse=True)
+
+            remaining_extra = extra_available
+            for di in debt_items:
+                if remaining_extra <= 0:
+                    break
+                apr = Decimal(di.get("apr") or "0")
+                balance = Decimal(di.get("balance") or "0")
+                minimum = Decimal(di.get("amount") or "0")
+                headroom = max(Decimal("0"), balance - minimum)
+                allocation = min(remaining_extra, headroom)
+                if allocation > 0:
+                    extra_allocations.append({
+                        "label": di["label"],
+                        "extra_amount": str(allocation),
+                        "apr": di.get("apr"),
+                    })
+                    # Interest saved vs equal distribution: extra payment at this
+                    # APR saves more than spreading it equally
+                    monthly_rate = apr / 100 / 12
+                    interest_saved += allocation * monthly_rate
+                    remaining_extra -= allocation
+
+        return {
+            "paycheck_date": paycheck_date,
+            "next_paycheck_date": next_paycheck_date,
+            "estimated_income": str(estimated_income.quantize(Decimal("0.01"))),
+            "items": items,
+            "extra_allocations": extra_allocations,
+            "totals": {
+                "required": str(total_required.quantize(Decimal("0.01"))),
+                "extra_available": str(max(Decimal("0"), extra_available).quantize(Decimal("0.01"))),
+            },
+            "remaining_variable": str(max(Decimal("0"), extra_available - sum(
+                Decimal(a["extra_amount"]) for a in extra_allocations
+            )).quantize(Decimal("0.01"))),
+            "interest_saved_vs_equal": str(interest_saved.quantize(Decimal("0.01"))),
+        }
+
+    # ------------------------------------------------------------------
+    # Budget Strategy (50/30/20)
+    # ------------------------------------------------------------------
+
+    def get_budget_strategy(self) -> dict:
+        """Compute 50/30/20 analysis using 3-month budget snapshot."""
+        from budgetapp.core.budget import compute_strategy
+        from datetime import date, timedelta
+        from decimal import Decimal
+
+        n = 3
+        today = date.today()
+        first_of_current = today.replace(day=1)
+        end_date = first_of_current - timedelta(days=1)
+        start_date = end_date.replace(day=1)
+        for _ in range(n - 1):
+            start_date = (start_date - timedelta(days=1)).replace(day=1)
+
+        bucket_rows = self.conn.execute(
+            """SELECT c.bucket, SUM(CAST(t.amount AS REAL)) AS total
+               FROM transactions t
+               JOIN categories c ON t.category_id = c.id
+               WHERE t.date >= ? AND t.date <= ? AND c.bucket != 'transfers'
+               GROUP BY c.bucket""",
+            (start_date.isoformat(), end_date.isoformat()),
+        ).fetchall()
+        by_bucket = {r["bucket"]: Decimal(str(r["total"])) for r in bucket_rows}
+
+        snapshot = {
+            "monthly_income": float(by_bucket.get("income", Decimal("0")) / n),
+            "monthly_bills": float(abs(by_bucket.get("bills", Decimal("0"))) / n),
+            "monthly_subscriptions": float(abs(by_bucket.get("subscriptions", Decimal("0"))) / n),
+            "monthly_variable": float(abs(by_bucket.get("expenses", Decimal("0"))) / n),
+            "monthly_debt_payments": float(abs(by_bucket.get("debts", Decimal("0"))) / n),
+            "monthly_savings_contributions": float(abs(by_bucket.get("savings", Decimal("0"))) / n),
+        }
+
+        return compute_strategy(snapshot)
+
+    # ------------------------------------------------------------------
+    # Monthly Report
+    # ------------------------------------------------------------------
+
+    def get_monthly_report(self, month: str) -> dict:
+        """Generate a monthly report card for a given YYYY-MM."""
+        from decimal import Decimal
+        from datetime import date, timedelta
+
+        # Total income and expenses for the month
+        bucket_rows = self.conn.execute(
+            """SELECT c.bucket, SUM(CAST(t.amount AS REAL)) AS total
+               FROM transactions t
+               JOIN categories c ON t.category_id = c.id
+               WHERE t.date LIKE ? AND c.bucket != 'transfers'
+               GROUP BY c.bucket""",
+            (f"{month}-%",),
+        ).fetchall()
+        by_bucket = {r["bucket"]: Decimal(str(r["total"])) for r in bucket_rows}
+
+        income = by_bucket.get("income", Decimal("0"))
+        total_expenses = Decimal("0")
+        for b in ("bills", "subscriptions", "expenses", "debts", "savings"):
+            total_expenses += abs(by_bucket.get(b, Decimal("0")))
+
+        net = income - total_expenses
+
+        # Budget adherence
+        cat_rows = self.conn.execute(
+            """SELECT t.category_id, c.name, c.bucket, c.budget_amount,
+                      ABS(SUM(CAST(t.amount AS REAL))) AS total_spent
+               FROM transactions t
+               JOIN categories c ON t.category_id = c.id
+               WHERE t.date LIKE ? AND c.bucket NOT IN ('transfers', 'income')
+                 AND c.budget_amount IS NOT NULL
+               GROUP BY t.category_id""",
+            (f"{month}-%",),
+        ).fetchall()
+        cats_with_budget = len(cat_rows)
+        cats_at_or_under = sum(
+            1 for r in cat_rows
+            if Decimal(str(r["total_spent"])) <= Decimal(r["budget_amount"])
+        )
+        adherence_pct = (cats_at_or_under / cats_with_budget * 100) if cats_with_budget > 0 else 100.0
+
+        # Top 3 spending categories
+        top_cats = self.conn.execute(
+            """SELECT c.name, c.bucket,
+                      ABS(SUM(CAST(t.amount AS REAL))) AS total
+               FROM transactions t
+               JOIN categories c ON t.category_id = c.id
+               WHERE t.date LIKE ? AND c.bucket NOT IN ('transfers', 'income')
+               GROUP BY t.category_id
+               ORDER BY total DESC
+               LIMIT 3""",
+            (f"{month}-%",),
+        ).fetchall()
+        top_spending = [
+            {"name": r["name"], "bucket": r["bucket"],
+             "amount": float(Decimal(str(r["total"])))}
+            for r in top_cats
+        ]
+
+        # Spiking categories (>30% above 3-month average)
+        # Compute 3-month average for comparison
+        try:
+            report_date = date.fromisoformat(f"{month}-01")
+        except Exception:
+            report_date = date.today().replace(day=1)
+        prior_months = []
+        d = report_date
+        for _ in range(3):
+            d = (d - timedelta(days=1)).replace(day=1)
+            prior_months.append(d.strftime("%Y-%m"))
+
+        spikes: list[dict] = []
+        if prior_months:
+            avg_by_cat: dict[str, Decimal] = {}
+            for pm in prior_months:
+                pm_rows = self.conn.execute(
+                    """SELECT t.category_id, c.name,
+                              ABS(SUM(CAST(t.amount AS REAL))) AS total
+                       FROM transactions t
+                       JOIN categories c ON t.category_id = c.id
+                       WHERE t.date LIKE ? AND c.bucket NOT IN ('transfers', 'income')
+                       GROUP BY t.category_id""",
+                    (f"{pm}-%",),
+                ).fetchall()
+                for r in pm_rows:
+                    cid = r["category_id"]
+                    avg_by_cat[cid] = avg_by_cat.get(cid, Decimal("0")) + Decimal(str(r["total"]))
+
+            for cid in avg_by_cat:
+                avg_by_cat[cid] = avg_by_cat[cid] / len(prior_months)
+
+            current_cats = self.conn.execute(
+                """SELECT t.category_id, c.name,
+                          ABS(SUM(CAST(t.amount AS REAL))) AS total
+                   FROM transactions t
+                   JOIN categories c ON t.category_id = c.id
+                   WHERE t.date LIKE ? AND c.bucket NOT IN ('transfers', 'income')
+                   GROUP BY t.category_id""",
+                (f"{month}-%",),
+            ).fetchall()
+            for r in current_cats:
+                cid = r["category_id"]
+                current_val = Decimal(str(r["total"]))
+                avg_val = avg_by_cat.get(cid, Decimal("0"))
+                if avg_val > 0 and current_val > avg_val * Decimal("1.3"):
+                    pct = float((current_val - avg_val) / avg_val * 100)
+                    spikes.append({
+                        "name": r["name"],
+                        "current": float(current_val),
+                        "average": float(avg_val),
+                        "pct_above": round(pct, 1),
+                    })
+
+        # Savings rate
+        savings_rate = float((income - total_expenses + income) / income * 100 - 100) if income > 0 else 0.0
+        # Simpler: savings_rate = net / income
+        savings_rate = float(net / income * 100) if income > 0 else 0.0
+
+        # Letter grade
+        if income > 0:
+            surplus_pct = float(net / income)
+            if surplus_pct >= 0.15:
+                grade = "A"
+            elif surplus_pct >= 0.05:
+                grade = "B"
+            elif surplus_pct >= 0:
+                grade = "C"
+            elif surplus_pct >= -0.05:
+                grade = "D"
+            else:
+                grade = "F"
+        else:
+            grade = "C"  # no income data
+
+        return {
+            "month": month,
+            "total_income": float(income),
+            "total_expenses": float(total_expenses),
+            "net": float(net),
+            "budget_adherence_pct": round(adherence_pct, 1),
+            "categories_budgeted": cats_with_budget,
+            "categories_at_or_under": cats_at_or_under,
+            "top_spending": top_spending,
+            "spikes": spikes,
+            "savings_rate": round(savings_rate, 1),
+            "grade": grade,
+        }
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 

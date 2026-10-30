@@ -48,13 +48,13 @@ def test_seed_rules(repo):
 
 def test_upsert_transactions(repo, chase_df):
     inserted = repo.upsert_transactions(chase_df)
-    assert inserted == 11
+    assert len(inserted) == 11
 
 
 def test_upsert_idempotent(repo, chase_df):
     repo.upsert_transactions(chase_df)
     second = repo.upsert_transactions(chase_df)
-    assert second == 0  # no new rows
+    assert len(second) == 0  # no new rows
 
 
 def test_get_transactions_all(repo, chase_df):
